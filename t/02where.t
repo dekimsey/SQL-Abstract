@@ -52,7 +52,7 @@ my @handle_tests = (
             reportid => { 'in', [567, 2335, 2] }
         },
         order => [],
-        stmt => " WHERE ( reportid IN (?, ?, ?) AND status = ? )",
+        stmt => " WHERE ( reportid IN ( ?, ?, ? ) AND status = ? )",
         bind => [qw/567 2335 2 completed/],
     },
 
@@ -62,7 +62,7 @@ my @handle_tests = (
             reportid => { 'not in', [567, 2335, 2] }
         },
         order => [],
-        stmt => " WHERE ( reportid NOT IN (?, ?, ?) AND status = ? )",
+        stmt => " WHERE ( reportid NOT IN ( ?, ?, ? ) AND status = ? )",
         bind => [qw/567 2335 2 completed/],
     },
 
@@ -88,7 +88,7 @@ my @handle_tests = (
             },
         ],
         order => [],
-        stmt => " WHERE ( ( status IN (?, ?) AND user = ? ) OR ( status = ? AND user = ? ) )",
+        stmt => " WHERE ( ( status IN ( ?, ? ) AND user = ? ) OR ( status = ? AND user = ? ) )",
         bind => [qw/pending dispatched nwiger unassigned robot/],
     },
 

@@ -6,7 +6,7 @@ $TESTING = 1;
 use Test;
 
 # use a BEGIN block so we print our plan before CGI::FormBuilder is loaded
-BEGIN { plan tests => 10 }
+BEGIN { plan tests => 12 }
 
 use SQL::Abstract;
 
@@ -60,7 +60,17 @@ my @handle_tests = (
       {
               args => {case => "lower", cmp => "like"},
               stmt => 'select * from test where ( a like ? and b like ? )'
-      }
+      },
+      #11
+      {
+              args => {case => "lower", convert => "lower", cmp => "like"},
+              stmt => 'select * from test where ( lower(a) like lower(?) and lower(b) like lower(?) )'
+      },
+      #12
+      {
+              args => {convert => "Round"},
+              stmt => 'SELECT * FROM test WHERE ( ROUND(a) = ROUND(?) AND ROUND(b) = ROUND(?) )',
+      },
 );
 
 for (@handle_tests) {
@@ -69,9 +79,9 @@ for (@handle_tests) {
       my $sql = SQL::Abstract->new($_->{args});
       my($stmt, @bind) = $sql->select('test', '*', { a => 4, b => 0});
       ok($stmt eq $_->{stmt} && $bind[0] == 4 && $bind[1] == 0) or 
-              print "got\n",
+              warn "got\n",
                     "[$stmt], [@bind]\n",
                     "instead of\n",
-                    "[$_->{stmt}] [4]\n\n";
+                    "[$_->{stmt}] [4, 0]\n\n";
 }
 

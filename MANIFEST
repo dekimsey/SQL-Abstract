@@ -1,8 +1,8 @@
 Abstract.pm
 Makefile.PL
-README
 Changes
 MANIFEST
+README
 t/00new.t
 t/01generate.t
 t/02where.t

@@ -53,12 +53,15 @@ my @data = (
         user => 'barbara_streisand',
         name => 'MechaStreisand!',
         phone => 0,
-        addr => 0E0,
+        addr => -9230992340,
         city => 42,
         state => 'CO',
     },
 );
 
+# Note to self: I have no idea what this does anymore
+# It looks like a cool fucking segment of code though!
+# I just wish I remembered writing it... :-\
 
 my($sth, $stmt);
 my($laststmt, $numfields);

@@ -74,6 +74,26 @@ These are then used directly in your DBI code:
     my $sth = $dbh->prepare($stmt);
     $sth->execute(@bind);
 
+In addition, you can apply SQL functions to elements of your C<%data>
+by specifying an arrayref for the given hash value. For example, if
+you need to execute the Oracle C<to_date> function on a value, you
+can say something like this:
+
+    my %data = (
+        name => 'Bill',
+        date_entered => ["to_date(?,'MM/DD/YYYY')", "03/02/2003"],
+    ); 
+
+The first value in the array is the actual SQL. Any other values are
+optional and would be included in the bind values array. This gives
+you:
+
+    my($stmt, @bind) = $sql->insert('people', \%data);
+
+    $stmt = "INSERT INTO people (name, date_entered) 
+                VALUES (?, to_date(?,'MM/DD/YYYY'))";
+    @bind = ('Bill', '03/02/2003');
+
 An UPDATE is just as easy, all you change is the name of the function:
 
     my($stmt, @bind) = $sql->update('people', \%data);
@@ -81,7 +101,7 @@ An UPDATE is just as easy, all you change is the name of the function:
 Notice that your C<%data> isn't touched; the module will generate
 the appropriately quirky SQL for you automatically. Usually you'll
 want to specify a WHERE clause for your UPDATE, though, which is
-where handling C<%where> hashes comes in handy.
+where handling C<%where> hashes comes in handy...
 
 This module can generate pretty complicated WHERE statements
 easily. For example, simple C<key=value> pairs are taken to mean
@@ -124,7 +144,7 @@ use Carp;
 use strict;
 use vars qw($VERSION %SQL);
 
-$VERSION = do { my @r=(q$Revision: 1.13 $=~/\d+/g); sprintf "%d."."%02d"x$#r,@r };
+$VERSION = do { my @r=(q$Revision: 1.14 $=~/\d+/g); sprintf "%d."."%02d"x$#r,@r };
 
 # Fix SQL case, if so requested
 sub _sqlcase {
@@ -146,10 +166,19 @@ sub _table ($) {
     return ($ref eq 'ARRAY') ? join(', ', @$tab) : $tab;
 }
 
-=head2 new(case => 'lower', cmp => 'like', logic => 'and')
+# Conversion, if applicable
+sub _convert ($) {
+    my $self = shift;
+    return @_ unless $self->{convert};
+    my $conv = $self->_sqlcase($self->{convert});
+    my @ret = map { $conv.'('.$_.')' } @_;
+    return wantarray ? @ret : $ret[0];
+}
+
+=head2 new(case => 'lower', cmp => 'like', logic => 'and', convert => 'upper')
 
 The C<new()> function takes a list of options and values, and returns
-a new C<SQL::Abstract> object which can then be used to generate SQL
+a new B<SQL::Abstract> object which can then be used to generate SQL
 through the methods below. The options accepted are:
 
 =over
@@ -170,12 +199,12 @@ it is C<=>, meaning that a hash like this:
 
 Will generate SQL like this:
 
-    ... WHERE name = 'nwiger' AND email = 'nate@wiger.org'
+    WHERE name = 'nwiger' AND email = 'nate@wiger.org'
 
 However, you may want loose comparisons by default, so if you set
 C<cmp> to C<like> you would get SQL such as:
 
-    ... WHERE name like 'nwiger' AND email like 'nate@wiger.org'
+    WHERE name like 'nwiger' AND email like 'nate@wiger.org'
 
 You can also override the comparsion on an individual basis - see
 the huge section on L</"WHERE CLAUSES"> at the bottom.
@@ -193,16 +222,34 @@ array of the form:
 
 Will generate SQL like this:
 
-    ... WHERE event_date >= '2/13/99' OR event_date <= '4/24/03'
+    WHERE event_date >= '2/13/99' OR event_date <= '4/24/03'
 
-This is probably not what you want given this query, though. To
-change the "OR" to an "AND", simply specify:
+This is probably not what you want given this query, though (look
+at the dates). To change the "OR" to an "AND", simply specify:
 
     my $sql = SQL::Abstract->new(logic => 'and');
 
 Which will change the above C<WHERE> to:
 
-    ... WHERE event_date >= '2/13/99' AND event_date <= '4/24/03'
+    WHERE event_date >= '2/13/99' AND event_date <= '4/24/03'
+
+=item convert
+
+This will automatically convert comparisons using the specified SQL
+function for both column and value. This is mostly used with an argument
+of C<upper> or C<lower>, so that the SQL will have the effect of
+case-insensitive "searches". For example, this:
+
+    $sql = SQL::Abstract->new(convert => 'upper');
+    %where = (keywords => 'MaKe iT CAse inSeNSItive');
+
+Will turn out the following SQL:
+
+    WHERE upper(keywords) like upper('MaKe iT CAse inSeNSItive')
+
+The conversion can be C<upper()>, C<lower()>, or any other SQL function
+that can be applied symmetrically to fields, actually (B<SQL::Abstract> does not
+validate this option; it will just pass through what you specify verbatim).
 
 =back
 
@@ -241,12 +288,19 @@ sub insert {
     my $sql   = $self->_sqlcase('insert into') . " $table ";
     my(@sqlf, @sqlv, @sqlq) = ();
 
-    if (ref $data eq 'HASH') {
+    my $ref = ref $data;
+    if ($ref eq 'HASH') {
         for my $k (sort keys %$data) {
             my $v = $data->{$k};
+            my $r = ref $v;
             # named fields, so must save names in order
             push @sqlf, $k;
-            if (ref $v eq 'SCALAR') {
+            if ($r eq 'ARRAY') {
+                # SQL included for values
+                my @val = @$v;
+                push @sqlq, shift @val;
+                push @sqlv, @val;
+            } elsif ($r eq 'SCALAR') {
                 # embedded literal SQL
                 push @sqlq, $$v;
             } else { 
@@ -255,10 +309,15 @@ sub insert {
             }
         }
         $sql .= '(' . join(', ', @sqlf) .') '. $self->_sqlcase('values') . ' ('. join(', ', @sqlq) .')';
-    } elsif (ref $data eq 'ARRAY') {
+    } elsif ($ref eq 'ARRAY') {
         # just generate values(?,?) part
         for my $v (@$data) {
-            if (ref $v eq 'SCALAR') {
+            my $r = ref $v;
+            if ($r eq 'ARRAY') {
+                my @val = @$v;
+                push @sqlq, shift @val;
+                push @sqlv, @val;
+            } elsif ($r eq 'SCALAR') {
                 # embedded literal SQL
                 push @sqlq, $$v;
             } else { 
@@ -267,9 +326,11 @@ sub insert {
             }
         }
         $sql .= $self->_sqlcase('values') . ' ('. join(', ', @sqlq) .')';
-    } elsif (ref $data eq 'SCALAR') {
+    } elsif ($ref eq 'SCALAR') {
         # literal SQL
         $sql .= $$data;
+    } else {
+        croak "Unsupported data type specified to \$sql->insert";
     }
 
     return wantarray ? ($sql, @sqlv) : $sql;
@@ -292,9 +353,19 @@ sub update {
     my $sql   = $self->_sqlcase('update') . " $table " . $self->_sqlcase('set ');
     my(@sqlf, @sqlv) = ();
 
+    croak "Unsupported data type specified to \$sql->update"
+        unless ref $data eq 'HASH';
+
     for my $k (sort keys %$data) {
         my $v = $data->{$k};
-        if (ref $v eq 'SCALAR') {
+        my $r = ref $v;
+        if ($r eq 'ARRAY') {
+            # SQL included for values
+            my @bind = @$v;
+            my $sql = shift @bind;
+            push @sqlf, "$k = $sql";
+            push @sqlv, @bind;
+        } elsif ($r eq 'SCALAR') {
             # embedded literal SQL
             push @sqlf, "$k = $$v";
         } else { 
@@ -325,12 +396,12 @@ corresponding SQL SELECT statement and list of bind values.
 sub select {
     my $self   = shift;
     my $table  = _table(shift);
-    my $fields = shift || ['*'];
+    my $fields = shift || '*';
     my $where  = shift;
     my $order  = shift;
 
     my $f = (ref $fields eq 'ARRAY') ? join ', ', @$fields : $fields;
-    my $sql = $self->_sqlcase('select') . " $f " . $self->_sqlcase('from') . " $table";
+    my $sql = join ' ', $self->_sqlcase('select'), $f, $self->_sqlcase('from'), $table;
 
     my(@sqlf, @sqlv) = ();
     my($wsql, @wval) = $self->where($where, $order);
@@ -431,8 +502,8 @@ sub _recurse_where {
                 $el = {$el => shift(@$where)};
             }
             my @ret = $self->_recurse_where($el, $subjoin);
-            push @sqlf, shift @ret;
-            push @sqlv, @ret;
+            push @sqlf, $self->_convert(shift @ret);
+            push @sqlv, $self->_convert(@ret);
         }
     }
     elsif ($ref eq 'HASH') {
@@ -452,8 +523,8 @@ sub _recurse_where {
                 my @ret = $self->_recurse_where(\@w, $self->_sqlcase('or'));
 
                 # push results into our structure
-                push @sqlf, shift @ret;
-                push @sqlv, @ret;
+                push @sqlf, $self->_convert(shift @ret);
+                push @sqlv, $self->_convert(@ret);
             } elsif (ref $v eq 'HASH') {
                 # modified operator { '!=', 'completed' }
                 my($f,$x) = each %$v;
@@ -464,9 +535,12 @@ sub _recurse_where {
                     my $u = $self->_sqlcase($1);
                     if ($u =~ /between/i) {
                         # SQL sucks
-                        push @sqlf, "$k $u ? ".$self->_sqlcase('and')." ?";
+                        push @sqlf, join ' ', $self->_convert($k), $u, $self->_convert('?'),
+                                              $self->_sqlcase('and'), $self->_convert('?');
                     } else {
-                        push @sqlf, "$k $u (".join(', ', map {'?'} @$x).')';
+                        push @sqlf, join ' ', $self->_convert($k), $u, '(',
+                                        join(', ', map { $self->_convert('?') } @$x),
+                                    ')';
                     }
                     push @sqlv, @$x;
                 } elsif (! defined($x)) {
@@ -474,7 +548,7 @@ sub _recurse_where {
                     my $not = ($f eq '!=' || $f eq 'not like') ? ' not' : '';
                     push @sqlf, $k . $self->_sqlcase(" is$not null");
                 } else {
-                    push @sqlf, "$k $f ?";
+                    push @sqlf, join ' ', $self->_convert($k), $f, $self->_convert('?');
                     push @sqlv, $x;
                 }
 
@@ -486,7 +560,7 @@ sub _recurse_where {
             } else {
                 # standard key => val
                 $self->_debug("NOREF($k) means simple key=val: $k $self->{cmp} $v");
-                push @sqlf, "$k ".$self->_sqlcase($self->{cmp}).' ?';
+                push @sqlf, join ' ', $self->_convert($k), $self->_sqlcase($self->{cmp}), $self->_convert('?');
                 push @sqlv, $v;
             }
         }
@@ -715,15 +789,15 @@ To maximize performance, use a code snippet like the following:
 
     # prepare a statement handle using the first row
     # and then reuse it for the rest of the rows
-    my($sth,$stmt);
-    for my $href (@LoH) {
+    my($sth, $stmt);
+    for my $href (@array_of_hashrefs) {
         $stmt ||= $sql->insert('table', $href);
         $sth  ||= $dbh->prepare($stmt);
         $sth->execute($sql->values($href));
     }
 
 The reason this works is because the keys in your C<$href> are sorted
-internally by C<SQL::Abstract>. Thus, as long as your data retains
+internally by B<SQL::Abstract>. Thus, as long as your data retains
 the same structure, you only have to generate the SQL the first time
 around. On subsequent queries, simply use the C<values> function provided
 by this module to return your values in the correct order.
@@ -760,17 +834,24 @@ apps in under 50 lines.
 
 There are a number of individuals that have really helped out with
 this module. Unfortunately, most of them submitted bugs via CPAN
-so I have no idea who they are! But the two people I do know are
-Mark Stosberg (benchmarking) and Chas Owens (initial "IN" operator
-support). Thanks!
+so I have no idea who they are! But the people I do know are
+Mark Stosberg (benchmarking), Chas Owens (initial "IN" operator
+support), and Philip Collins (per-field SQL functions). Thanks!
+
+=head1 BUGS
+
+If found, please DO NOT submit anything via C<rt.cpan.org> - that
+just causes me a ton of work. Email me a patch (or script demonstrating
+the problem) at the below address, and include the VERSION string you'll
+be seeing shortly.
 
 =head1 SEE ALSO
 
-L<DBIx::Abstract>, L<DBI>, L<CGI::FormBuilder>, L<HTML::QuickTable>
+L<DBIx::Abstract>, L<DBI|DBI>, L<CGI::FormBuilder>, L<HTML::QuickTable>
 
 =head1 VERSION
 
-$Id: Abstract.pm,v 1.13 2003/05/21 17:22:29 nwiger Exp $
+$Id: Abstract.pm,v 1.14 2003/11/04 21:20:33 nwiger Exp $
 
 =head1 AUTHOR
 

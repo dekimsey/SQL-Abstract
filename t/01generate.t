@@ -6,7 +6,7 @@ $TESTING = 1;
 use Test;
 
 # use a BEGIN block so we print our plan before CGI::FormBuilder is loaded
-BEGIN { plan tests => 20 }
+BEGIN { plan tests => 22 }
 
 use SQL::Abstract;
 
@@ -66,7 +66,7 @@ my @tests = (
       {
               func => 'select',
               args => [[qw/test1 test2/], '*', { 'test1.a' => { 'In', ['boom', 'bang'] } }],
-              stmt => 'SELECT * FROM test1, test2 WHERE ( test1.a IN (?, ?) )',
+              stmt => 'SELECT * FROM test1, test2 WHERE ( test1.a IN ( ?, ? ) )',
               bind => ['boom', 'bang']
       },
       #9
@@ -142,22 +142,34 @@ my @tests = (
               stmt => 'INSERT INTO test VALUES (?, ?, ?, ?, ?, ?)',
               bind => [qw/1 2 3 4 5/, undef],
       },
-      #17
+      #19
       {
               func => 'update',
               args => ['test', {a => 1, b => 2, c => 3, d => 4, e => 5}],
               stmt => 'UPDATE test SET a = ?, b = ?, c = ?, d = ?, e = ?',
               bind => [qw/1 2 3 4 5/],
       },
-      #18
+      #20
       {
               func => 'update',
               args => ['test', {a => 1, b => 2, c => 3, d => 4, e => 5}, {a => {'in', [1..5]}}],
-              stmt => 'UPDATE test SET a = ?, b = ?, c = ?, d = ?, e = ? WHERE ( a IN (?, ?, ?, ?, ?) )',
+              stmt => 'UPDATE test SET a = ?, b = ?, c = ?, d = ?, e = ? WHERE ( a IN ( ?, ?, ?, ?, ? ) )',
               bind => [qw/1 2 3 4 5 1 2 3 4 5/],
       },
-
-
+      #21
+      {
+              func => 'update',
+              args => ['test', {a => 1, b => ["to_date(?, 'MM/DD/YY')", '02/02/02']}, {a => {'between', [1,2]}}],
+              stmt => 'UPDATE test SET a = ?, b = to_date(?, \'MM/DD/YY\') WHERE ( a BETWEEN ? AND ? )',
+              bind => [qw(1 02/02/02 1 2)],
+      },
+      #22
+      {
+              func => 'insert',
+              args => ['test.table', {high_limit => \'max(all_limits)', low_limit => 4} ],
+              stmt => 'INSERT INTO test.table (high_limit, low_limit) VALUES (max(all_limits), ?)',
+              bind => ['4'],
+      },
 );
 
 for (@tests) {
