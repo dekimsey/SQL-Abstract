@@ -1,15 +1,32 @@
 
 RCS file: /home/nwiger/perlmod/lib/SQL/RCS/Abstract.pm,v
 Working file: /home/nwiger/perlmod/lib/SQL/Abstract.pm
-head: 1.10
+head: 1.13
 branch:
 locks: strict
 access list:
 symbolic names:
 keyword substitution: kv
-total revisions: 10;	selected revisions: 10
+total revisions: 13;	selected revisions: 13
 description:
 SQL::Abstract - Generate SQL from Perl data structures
+----------------------------
+revision 1.13
+date: 2003/05/21 17:22:29;  author: nwiger;  state: Exp;  lines: +230 -74
+added "IN" and "BETWEEN" operator support, as well as "NOT"
+modified where() to support ORDER BY, and fixed some bugs too
+added PERFORMANCE and FORMBUILDER doc sections
+fixed several bugs in _recurse_where(), it now works as expected
+added test suite, many thanks to Chas Owens
+modified all hash access to return keys sorted, to allow cached queries
+----------------------------
+revision 1.12
+date: 2003/05/08 20:10:56;  author: nwiger;  state: Exp;  lines: +181 -96
+1.11 interim checking; major bugfixes and order_by, 1.12 will go to CPAN
+----------------------------
+revision 1.11
+date: 2003/05/02 00:07:30;  author: nwiger;  state: Exp;  lines: +52 -12
+many minor enhancements to add querying flexibility
 ----------------------------
 revision 1.10
 date: 2002/09/27 18:06:25;  author: nwiger;  state: Exp;  lines: +6 -2

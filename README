@@ -4,48 +4,100 @@ NAME
 SYNOPSIS
         use SQL::Abstract;
 
-        my $sql = SQL::Abstract->new(case => 'lower', cmp => 'like');
+        my $sql = SQL::Abstract->new;
 
         my($stmt, @bind) = $sql->select($table, \@fields, \%where, \@order);
 
-        my($stmt, @bind) = $sql->insert($table, \@values || \%fieldvals);
+        my($stmt, @bind) = $sql->insert($table, \%fieldvals || \@values);
 
         my($stmt, @bind) = $sql->update($table, \%fieldvals, \%where);
 
         my($stmt, @bind) = $sql->delete($table, \%where);
 
+        # Then, use these in your DBI statements
+        my $sth = $dbh->prepare($stmt);
+        $sth->execute(@bind);
+
         # Just generate the WHERE clause
-        my($stmt, @bind)  = $sql->where(\%where);
+        my($stmt, @bind)  = $sql->where(\%where, \@order);
+
+        # Return values in the same order, for hashed queries (see below)
+        my @bind = $sql->values(\%fieldvals);
 
 DESCRIPTION
     This module was inspired by the excellent DBIx::Abstract. However, in
-    using the module I found that what I wanted to do was generate SQL, but
-    still retain complete control over my statement handles and use the DBI
-    interface. So, I set out to create an abstract SQL generation module.
+    using that module I found that what I really wanted to do was generate
+    SQL, but still retain complete control over my statement handles and use
+    the DBI interface. So, I set out to create an abstract SQL generation
+    module.
 
-    This module is based largely on DBIx::Abstract. However, there are
-    several important differences, especially when it comes to WHERE
-    clauses. I have modified the concepts used to make the SQL easier to
-    generate from Perl data structures and, IMO, more intuitive.
+    While based on the concepts used by DBIx::Abstract, there are several
+    important differences, especially when it comes to WHERE clauses. I have
+    modified the concepts used to make the SQL easier to generate from Perl
+    data structures and, IMO, more intuitive. The underlying idea is for
+    this module to do what you mean, based on the data structures you
+    provide it. The big advantage is that you don't have to modify your code
+    every time your data changes, as this module figures it out.
 
-    In particular, if you want to see if a field is within a set of values,
-    you can use an arrayref. Let's look at a specific example:
+    To begin with, an SQL INSERT is as easy as just specifying a hash of
+    "key=value" pairs:
 
-        my $where = {
-           worker => ['nwiger', 'bob', 'jim'],
+        my %data = (
+            name => 'Jimbo Bobson',
+            phone => '123-456-7890',
+            address => '42 Sister Lane',
+            city => 'St. Louis',
+            state => 'Louisiana',
+        );
+
+    The SQL can then be generated with this:
+
+        my($stmt, @bind) = $sql->insert('people', \%data);
+
+    Which would give you something like this:
+
+        $stmt = "INSERT INTO people
+                        (address, city, name, phone, state)
+                        VALUES (?, ?, ?, ?, ?)";
+        @bind = ('42 Sister Lane', 'St. Louis', 'Jimbo Bobson',
+                 '123-456-7890', 'Louisiana');
+
+    These are then used directly in your DBI code:
+
+        my $sth = $dbh->prepare($stmt);
+        $sth->execute(@bind);
+
+    An UPDATE is just as easy, all you change is the name of the function:
+
+        my($stmt, @bind) = $sql->update('people', \%data);
+
+    Notice that your %data isn't touched; the module will generate the
+    appropriately quirky SQL for you automatically. Usually you'll want to
+    specify a WHERE clause for your UPDATE, though, which is where handling
+    %where hashes comes in handy.
+
+    This module can generate pretty complicated WHERE statements easily. For
+    example, simple "key=value" pairs are taken to mean equality, and if you
+    want to see if a field is within a set of values, you can use an
+    arrayref. Let's say we wanted to SELECT some data based on this
+    criteria:
+
+        my %where = (
+           requestor => 'inna',
+           worker => ['nwiger', 'rcwe', 'sfz'],
            status => { '!=', 'completed' }
-        };
+        );
 
-        my($stmt, @bind) = $sql->select('requests', '*', $where);
+        my($stmt, @bind) = $sql->select('tickets', '*', \%where);
 
-    This would give you something like this:
+    The above would give you something like this:
 
-        $stmt = "SELECT * FROM requests WHERE
-                    ( ( worker = ? OR worker = ? OR worker = ? )
-                       AND ( status != ? ) )";
-        @bind = ('nwiger', 'bob', 'jim', 'completed');
+        $stmt = "SELECT * FROM tickets WHERE
+                    ( requestor = ? ) AND ( status != ? )
+                    AND ( worker = ? OR worker = ? OR worker = ? )";
+        @bind = ('inna', 'completed', 'nwiger', 'rcwe', 'sfz');
 
-    Which you could then use in DBI code:
+    Which you could then use in DBI code like so:
 
         my $sth = $dbh->prepare($stmt);
         $sth->execute(@bind);
@@ -54,9 +106,11 @@ DESCRIPTION
 
 FUNCTIONS
     The functions are simple. There's one for each major SQL operation, and
-    a constructor you use first.
+    a constructor you use first. The arguments are specified in a similar
+    order to each function (table, then fields, then a where clause) to try
+    and simplify things.
 
-  new(case => 'lower', cmp => 'like')
+  new(case => 'lower', cmp => 'like', logic => 'and')
     The "new()" function takes a list of options and values, and returns a
     new "SQL::Abstract" object which can then be used to generate SQL
     through the methods below. The options accepted are:
@@ -81,8 +135,31 @@ FUNCTIONS
 
             ... WHERE name like 'nwiger' AND email like 'nate@wiger.org'
 
-        You can also override the comparion on an individual basis - see the
-        huge section on "WHERE CLAUSES" at the bottom.
+        You can also override the comparsion on an individual basis - see
+        the huge section on "WHERE CLAUSES" at the bottom.
+
+    logic
+        This determines the default logical operator for multiple WHERE
+        statements in arrays. By default it is "or", meaning that a WHERE
+        array of the form:
+
+            @where = (
+                event_date => {'>=', '2/13/99'}, 
+                event_date => {'<=', '4/24/03'}, 
+            );
+
+        Will generate SQL like this:
+
+            ... WHERE event_date >= '2/13/99' OR event_date <= '4/24/03'
+
+        This is probably not what you want given this query, though. To
+        change the "OR" to an "AND", simply specify:
+
+            my $sql = SQL::Abstract->new(logic => 'and');
+
+        Which will change the above "WHERE" to:
+
+            ... WHERE event_date >= '2/13/99' AND event_date <= '4/24/03'
 
   insert($table, \@values || \%fieldvals)
     This is the simplest function. You simply give it a table name and
@@ -91,30 +168,37 @@ FUNCTIONS
 
   update($table, \%fieldvals, \%where)
     This takes a table, hashref of field/value pairs, and an optional
-    hashref where clause. It returns an SQL UPDATE function and a list of
+    hashref WHERE clause. It returns an SQL UPDATE function and a list of
     bind values.
 
   select($table, \@fields, \%where, \@order)
-    This takes a table, arrayref of fields (or '*'), optional hashref where
+    This takes a table, arrayref of fields (or '*'), optional hashref WHERE
     clause, and optional arrayref order by, and returns the corresponding
     SQL SELECT statement and list of bind values.
 
   delete($table, \%where)
-    This takes a table name and optional hashref where clause. It returns an
+    This takes a table name and optional hashref WHERE clause. It returns an
     SQL DELETE statement and list of bind values.
 
-  where(\%where)
-    This is used just to generate the WHERE clause. For example, if you have
+  where(\%where, \@order)
+    This is used to generate just the WHERE clause. For example, if you have
     an arbitrary data structure and know what the rest of your SQL is going
-    to look like but want an easy way to produce a WHERE clause, use this.
+    to look like, but want an easy way to produce a WHERE clause, use this.
     It returns an SQL WHERE clause and list of bind values.
+
+  values(\%data)
+    This just returns the values from the hash %data, in the same order that
+    would be returned from any of the other above queries. Using this allows
+    you to markedly speed up your queries if you are affecting lots of rows.
+    See below under the "PERFORMANCE" section.
 
 WHERE CLAUSES
     This module uses a variation on the idea from DBIx::Abstract. It is NOT,
-    repeat *not* 100% compatible.
+    repeat *not* 100% compatible. The main logic of this module is that
+    things in arrays are OR'ed, and things in hashes are AND'ed.
 
-    The easiest way is to show lots of examples. After each %where hash
-    shown, it is assumed you ran:
+    The easiest way to explain is to show lots of examples. After each
+    %where hash shown, it is assumed you used:
 
         my($stmt, @bind) = $sql->where(\%where);
 
@@ -146,7 +230,7 @@ WHERE CLAUSES
         $stmt = "WHERE user = ? AND ( status = ? OR status = ? OR status = ? )";
         @bind = ('nwiger', 'assigned', 'in-progress', 'pending');
 
-    Note this is not compatible with "DBIx::Abstract"
+    Note this is NOT compatible with "DBIx::Abstract".
 
     If you want to specify a different type of operator for your comparison,
     you can use a hashref:
@@ -160,6 +244,46 @@ WHERE CLAUSES
 
         $stmt = "WHERE user = ? AND status != ?";
         @bind = ('nwiger', 'completed');
+
+    Note that this can be combined with the arrayref idea, to test for
+    values that are within a range:
+
+        my %where => (
+             user => 'nwiger'
+             priority  => [ {'>', 3}, {'<', 1} ],
+        );
+
+    Which would generate:
+
+        $stmt = "WHERE user = ? AND ( priority > ? ) OR ( priority < ? )";
+        @bind = ('nwiger', '3', '1');
+
+    You can use this same format to compare a list of fields using the "IN"
+    comparison operator, by specifying the list as an arrayref:
+
+        my %where  = (
+            status   => 'completed',
+            reportid => { 'in', [567, 2335, 2] }
+        );
+
+    Which would generate:
+
+        $stmt = "WHERE status = ? AND reportid IN (?,?,?)";
+        @bind = ('completed', '567', '2335', '2');
+
+    You can use this same format to use other grouping functions, such as
+    "BETWEEN", "SOME", and so forth. For example:
+
+        my %where  = (
+            user   => 'nwiger',
+            completion_date => {
+                'not between', ['2002-10-01', '2003-02-06']
+            }
+        );
+
+    Would give you:
+
+        WHERE user = ? AND completion_date NOT BETWEEN ? AND ?
 
     So far, we've seen how multiple conditions are joined with "AND".
     However, we can change this by putting the different conditions we want
@@ -182,30 +306,109 @@ WHERE CLAUSES
                     OR ( user = ? AND status = ? ) )";
         @bind = ('nwiger', 'pending', 'dispatched', 'robot', 'unassigned');
 
-    If you want to include plain SQL verbatim, you must specify it as a
-    scalar reference, namely:
+    Finally, sometimes only literal SQL will do. If you want to include
+    literal SQL verbatim, you can specify it as a scalar reference, namely:
 
         my $inn = 'is not null';
         my %where = (
-            pri  => { '>', 3 },
-            name => \$inn
+            priority => { '<', 2 },
+            requestor => \$inn
         );
 
     This would create:
 
-        $stmt = "WHERE pri > ? AND name is not null";
-        @bind = (3);
+        $stmt = "WHERE priority < ? AND requestor is not null";
+        @bind = ('2');
 
-    Note you only get one bind parameter back.
+    Note you only get one bind parameter back, since the verbatim SQL is
+    passed back as part of the statement.
+
+    Of course, just to prove a point, the above can also be accomplished
+    with this:
+
+        my %where = (
+            priority => { '<', 2 },
+            requestor => { '!=', undef },
+        );
+
+    TMTOWTDI.
+
+    These pages could go on for a while, since the nesting of the data
+    structures this module can handle are pretty much unlimited (the module
+    implements the "WHERE" expansion as a recursive function internally).
+    Your best bet is to "play around" with the module a little to see how
+    the data structures behave, and choose the best format for your data
+    based on that.
+
+    And of course, all the values above will probably be replaced with
+    variables gotten from forms or the command line. After all, if you knew
+    everything ahead of time, you wouldn't have to worry about
+    dynamically-generating SQL and could just hardwire it into your script.
+
+PERFORMANCE
+    Thanks to some benchmarking by Mark Stosberg, it turns out that this
+    module is many orders of magnitude faster than using "DBIx::Abstract". I
+    must admit this wasn't an intentional design issue, but it's a byproduct
+    of the fact that you get to control your "DBI" handles yourself.
+
+    To maximize performance, use a code snippet like the following:
+
+        # prepare a statement handle using the first row
+        # and then reuse it for the rest of the rows
+        my($sth,$stmt);
+        for my $href (@LoH) {
+            $stmt ||= $sql->insert('table', $href);
+            $sth  ||= $dbh->prepare($stmt);
+            $sth->execute($sql->values($href));
+        }
+
+    The reason this works is because the keys in your $href are sorted
+    internally by "SQL::Abstract". Thus, as long as your data retains the
+    same structure, you only have to generate the SQL the first time around.
+    On subsequent queries, simply use the "values" function provided by this
+    module to return your values in the correct order.
+
+FORMBUILDER
+    If you use my "CGI::FormBuilder" module at all, you'll hopefully really
+    like this part (I do, at least). Building up a complex query can be as
+    simple as the following:
+
+        #!/usr/bin/perl
+
+        use CGI::FormBuilder;
+        use SQL::Abstract;
+
+        my $form = CGI::FormBuilder->new(...);
+        my $sql  = SQL::Abstract->new;
+
+        if ($form->submitted) {
+            my $field = $form->field;
+            my($stmt, @bind) = $sql->select('table', '*', $field);
+        }
+
+    Of course, you would still have to connect using "DBI" to run the query,
+    but the point is that if you make your form look like your table, the
+    actual query script can be extremely simplistic.
+
+    If you're REALLY lazy (I am), check out "HTML::QuickTable" for a fast
+    interface to returning and formatting data. I frequently use these three
+    modules together to write complex database query apps in under 50 lines.
+
+ACKNOWLEDGEMENTS
+    There are a number of individuals that have really helped out with this
+    module. Unfortunately, most of them submitted bugs via CPAN so I have no
+    idea who they are! But the two people I do know are Mark Stosberg
+    (benchmarking) and Chas Owens (initial "IN" operator support). Thanks!
 
 SEE ALSO
-    DBIx::Abstract, SQL::Statement
+    DBIx::Abstract, DBI, CGI::FormBuilder, HTML::QuickTable
 
 VERSION
-    $Id: Abstract.pm,v 1.10 2002/09/27 18:06:25 nwiger Exp $
+    $Id: Abstract.pm,v 1.13 2003/05/21 17:22:29 nwiger Exp $
 
 AUTHOR
-    Copyright (c) 2001 Nathan Wiger <nate@sun.com>. All Rights Reserved.
+    Copyright (c) 2001-2003 Nathan Wiger <nate@sun.com>. All Rights
+    Reserved.
 
     This module is free software; you may copy this under the terms of the
     GNU General Public License, or the Artistic License, copies of which

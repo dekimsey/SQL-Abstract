@@ -1,6 +1,9 @@
 Abstract.pm
 Makefile.PL
 README
-test.pl
 Changes
 MANIFEST
+t/00new.t
+t/01generate.t
+t/02where.t
+t/03values.t
