@@ -26,7 +26,8 @@ SQL::Abstract - Generate SQL from Perl data structures
     # Just generate the WHERE clause
     my($stmt, @bind)  = $sql->where(\%where, \@order);
 
-    # Return values in the same order, for hashed queries (see below)
+    # Return values in the same order, for hashed queries
+    # See PERFORMANCE section for more details
     my @bind = $sql->values(\%fieldvals);
 
 =head1 DESCRIPTION
@@ -144,7 +145,7 @@ use Carp;
 use strict;
 use vars qw($VERSION %SQL);
 
-$VERSION = do { my @r=(q$Revision: 1.15 $=~/\d+/g); sprintf "%d."."%02d"x$#r,@r };
+$VERSION = do { my @r=(q$Revision: 1.17 $=~/\d+/g); sprintf "%d."."%02d"x$#r,@r };
 
 # Fix SQL case, if so requested
 sub _sqlcase {
@@ -173,6 +174,13 @@ sub _convert ($) {
     my $conv = $self->_sqlcase($self->{convert});
     my @ret = map { $conv.'('.$_.')' } @_;
     return wantarray ? @ret : $ret[0];
+}
+
+# And bindtype
+sub _bindtype (@) {
+    my $self = shift;
+    my($col,@val) = @_;
+    return $self->{bindtype} eq 'columns' ? [ @_ ] : @val;
 }
 
 =head2 new(case => 'lower', cmp => 'like', logic => 'and', convert => 'upper')
@@ -251,6 +259,54 @@ The conversion can be C<upper()>, C<lower()>, or any other SQL function
 that can be applied symmetrically to fields, actually (B<SQL::Abstract> does not
 validate this option; it will just pass through what you specify verbatim).
 
+=item bindtype
+
+This is a kludge because many databases suck. For example, you can't
+just bind values using DBI's C<execute()> for Oracle C<CLOB> or C<BLOB> fields.
+Instead, you have to use C<bind_param()>:
+
+    $sth->bind_param(1, 'reg data');
+    $sth->bind_param(2, $lots, {ora_type => ORA_CLOB});
+
+The problem is, B<SQL::Abstract> will normally just return a C<@bind> array,
+which loses track of which field each slot refers to. Fear not.
+
+If you specify C<bindtype> in new, you can determine how C<@bind> is returned.
+Currently, you can specify either C<normal> (default) or C<columns>. If you
+specify C<columns>, you will get an array that looks like this:
+
+    my $sql = SQL::Abstract->new(bindtype => 'keys');
+    my($stmt, @bind) = $sql->insert(...);
+
+    @bind = (
+        [ 'column1', 'value1' ],
+        [ 'column2', 'value2' ],
+        [ 'column3', 'value3' ],
+    );
+
+You can then iterate through this manually, using DBI's C<bind_param()>.
+    
+    $sth->prepare($stmt);
+    my $i = 1;
+    for (@bind) {
+        my($col, $data) = @$_;
+        if ($col eq 'details' || $col eq 'comments') {
+            $sth->bind_param($i, $data, {ora_type => ORA_CLOB});
+        } elsif ($col eq 'image') {
+            $sth->bind_param($i, $data, {ora_type => ORA_BLOB});
+        } else {
+            $sth->bind_param($i, $data);
+        }
+        $i++;
+    }
+    $sth->execute;      # execute without @bind now
+
+Now, why would you still use B<SQL::Abstract> if you have to do this crap?
+Basically, the advantage is still that you don't have to care which fields
+are or are not included. You could wrap that above C<for> loop in a simple
+sub called C<bind_fields()> or something and reuse it repeatedly. You still
+get a layer of abstraction over manual SQL specification.
+
 =back
 
 =cut
@@ -265,6 +321,10 @@ sub new {
 
     # override logical operator
     $opt{logic} = uc $opt{logic} if $opt{logic};
+
+    # how to return bind vars
+    #croak "Sorry, bindtype is not yet supported" if $opt{bindtype};
+    $opt{bindtype} ||= 'normal';
 
     # default comparison is "=", but can be overridden
     $opt{cmp} ||= '=';
@@ -299,18 +359,21 @@ sub insert {
                 # SQL included for values
                 my @val = @$v;
                 push @sqlq, shift @val;
-                push @sqlv, @val;
+                push @sqlv, $self->_bindtype($k, @val);
             } elsif ($r eq 'SCALAR') {
                 # embedded literal SQL
                 push @sqlq, $$v;
             } else { 
                 push @sqlq, '?';
-                push @sqlv, $v;
+                push @sqlv, $self->_bindtype($k, $v);
             }
         }
         $sql .= '(' . join(', ', @sqlf) .') '. $self->_sqlcase('values') . ' ('. join(', ', @sqlq) .')';
     } elsif ($ref eq 'ARRAY') {
         # just generate values(?,?) part
+        # no names (arrayref) so can't generate bindtype
+        carp "Warning: ",__PACKAGE__,"->insert called with arrayref when bindtype set"
+            if $self->{bindtype} ne 'normal';
         for my $v (@$data) {
             my $r = ref $v;
             if ($r eq 'ARRAY') {
@@ -364,13 +427,13 @@ sub update {
             my @bind = @$v;
             my $sql = shift @bind;
             push @sqlf, "$k = $sql";
-            push @sqlv, @bind;
+            push @sqlv, $self->_bindtype($k, @bind);
         } elsif ($r eq 'SCALAR') {
             # embedded literal SQL
             push @sqlf, "$k = $$v";
         } else { 
             push @sqlf, "$k = ?";
-            push @sqlv, $v;
+            push @sqlv, $self->_bindtype($k, $v);
         }
     }
 
@@ -507,6 +570,8 @@ sub _recurse_where {
         }
     }
     elsif ($ref eq 'HASH') {
+        # Note: during recursion, the last element will always be a hashref,
+        # since it needs to point a column => value. So this be the end.
         for my $k (sort keys %$where) {
             my $v = $where->{$k};
             if (! defined($v)) {
@@ -527,44 +592,45 @@ sub _recurse_where {
                 push @sqlv, @ret;
             } elsif (ref $v eq 'HASH') {
                 # modified operator { '!=', 'completed' }
-                my($f,$x) = each %$v;
-                $self->_debug("HASH($k) means modified operator: { $f }");
- 
-                # check for the operator being "IN" or "BETWEEN" or whatever
-                if ($f =~ /^([\s\w]+)$/i && ref $x eq 'ARRAY') {
-                    my $u = $self->_sqlcase($1);
-                    if ($u =~ /between/i) {
-                        # SQL sucks
-                        push @sqlf, join ' ', $self->_convert($k), $u, $self->_convert('?'),
-                                              $self->_sqlcase('and'), $self->_convert('?');
+                for my $f (sort keys %$v) {
+                    my $x = $v->{$f};
+                    $self->_debug("HASH($k) means modified operator: { $f }");
+
+                    # check for the operator being "IN" or "BETWEEN" or whatever
+                    if ($f =~ /^([\s\w]+)$/i && ref $x eq 'ARRAY') {
+                        my $u = $self->_sqlcase($1);
+                        if ($u =~ /between/i) {
+                            # SQL sucks
+                            push @sqlf, join ' ', $self->_convert($k), $u, $self->_convert('?'),
+                                                  $self->_sqlcase('and'), $self->_convert('?');
+                        } else {
+                            push @sqlf, join ' ', $self->_convert($k), $u, '(',
+                                            join(', ', map { $self->_convert('?') } @$x),
+                                        ')';
+                        }
+                        push @sqlv, $self->_bindtype($k, @$x);
+                    } elsif (ref $x eq 'ARRAY') {
+                        # multiple elements: multiple options
+                        $self->_debug("ARRAY($x) means multiple elements: [ @$x ]");
+
+                        # map into an array of hashrefs and recurse
+                        my @w = ();
+                        push @w, { $k => { $f => $_ } } for @$x;
+                        my @ret = $self->_recurse_where(\@w, $self->_sqlcase('or'));
+
+                        # push results into our structure
+                        push @sqlf, shift @ret;
+                        push @sqlv, @ret;
+                    } elsif (! defined($x)) {
+                        # undef = NOT null
+                        my $not = ($f eq '!=' || $f eq 'not like') ? ' not' : '';
+                        push @sqlf, $k . $self->_sqlcase(" is$not null");
                     } else {
-                        push @sqlf, join ' ', $self->_convert($k), $u, '(',
-                                        join(', ', map { $self->_convert('?') } @$x),
-                                    ')';
+                        # regular ol' value
+                        push @sqlf, join ' ', $self->_convert($k), $f, $self->_convert('?');
+                        push @sqlv, $self->_bindtype($k, $x);
                     }
-                    push @sqlv, @$x;
-                } elsif (ref $x eq 'ARRAY') {
-                    # multiple elements: multiple options
-                    $self->_debug("ARRAY($x) means multiple elements: [ @$x ]");
-
-                    # map into an array of hashrefs and recurse
-                    my @w = ();
-                    push @w, { $k => { $f => $_ } } for @$x;
-                    my @ret = $self->_recurse_where(\@w, $self->_sqlcase('or'));
-
-                    # push results into our structure
-                    push @sqlf, shift @ret;
-                    push @sqlv, @ret;
-                } elsif (! defined($x)) {
-                    # undef = NOT null
-                    my $not = ($f eq '!=' || $f eq 'not like') ? ' not' : '';
-                    push @sqlf, $k . $self->_sqlcase(" is$not null");
-                } else {
-                    push @sqlf, join ' ', $self->_convert($k), $f, $self->_convert('?');
-                    push @sqlv, $x;
                 }
-
-                keys %$v;   # reset iterator of each()
             } elsif (ref $v eq 'SCALAR') {
                 # literal SQL
                 $self->_debug("SCALAR($k) means literal SQL: $$v");
@@ -573,7 +639,7 @@ sub _recurse_where {
                 # standard key => val
                 $self->_debug("NOREF($k) means simple key=val: $k $self->{cmp} $v");
                 push @sqlf, join ' ', $self->_convert($k), $self->_sqlcase($self->{cmp}), $self->_convert('?');
-                push @sqlv, $v;
+                push @sqlv, $self->_bindtype($k, $v);
             }
         }
     }
@@ -587,7 +653,6 @@ sub _recurse_where {
         $self->_debug("NOREF(*top) means literal SQL: $where");
         push @sqlf, $where;
     }
-    #warn "\@sqlf = '@sqlf'";
 
     # assemble and return sql
     my $wsql = @sqlf ? '( ' . join(" $join ", @sqlf) . ' )' : '';
@@ -625,7 +690,108 @@ sub values {
     my $data = shift || return;
     croak "Argument to ", __PACKAGE__, "->values must be a \\%hash"
         unless ref $data eq 'HASH';
-    return map { $data->{$_} } sort keys %$data;
+    return map { $self->_bindtype($_, $data->{$_}) } sort keys %$data;
+}
+
+=head2 generate($any, 'number', $of, \@data, $struct, \%types)
+
+Warning: This is an experimental method and subject to change.
+
+This returns arbitrarily generated SQL. It's a really basic shortcut.
+It will return two different things, depending on return context:
+
+    my($stmt, @bind) = $sql->generate('create table', \$table, \@fields);
+    my $stmt_and_val = $sql->generate('create table', \$table, \@fields);
+
+These would return the following:
+
+    # First calling form
+    $stmt = "CREATE TABLE test (?, ?)";
+    @bind = (field1, field2);
+
+    # Second calling form
+    $stmt_and_val = "CREATE TABLE test (field1, field2)";
+
+Depending on what you're trying to do, it's up to you to choose the correct
+format. In this example, the second form is what you would want.
+
+By the same token:
+
+    $sql->generate('alter session', { nls_date_format => 'MM/YY' });
+
+Might give you:
+
+    ALTER SESSION SET nls_date_format = 'MM/YY'
+
+You get the idea. Strings get their case twiddled, but everything
+else remains verbatim.
+
+=cut
+
+sub generate {
+    my $self  = shift;
+
+    my(@sql, @sqlq, @sqlv);
+
+    for (@_) {
+        my $ref = ref $_;
+        if ($ref eq 'HASH') {
+            for my $k (sort keys %$_) {
+                my $v = $_->{$k};
+                my $r = ref $v;
+                if ($r eq 'ARRAY') {
+                    # SQL included for values
+                    my @bind = @$v;
+                    my $sql = shift @bind;
+                    push @sqlq, "$k = $sql";
+                    push @sqlv, $self->_bindtype($k, @bind);
+                } elsif ($r eq 'SCALAR') {
+                    # embedded literal SQL
+                    push @sqlq, "$k = $$v";
+                } else { 
+                    push @sqlq, "$k = ?";
+                    push @sqlv, $self->_bindtype($k, $v);
+                }
+            }
+            push @sql, $self->_sqlcase('set'), join ', ', @sqlq;
+        } elsif ($ref eq 'ARRAY') {
+            # unlike insert(), assume these are ONLY the column names, i.e. for SQL
+            for my $v (@$_) {
+                my $r = ref $v;
+                if ($r eq 'ARRAY') {
+                    my @val = @$v;
+                    push @sqlq, shift @val;
+                    push @sqlv, @val;
+                } elsif ($r eq 'SCALAR') {
+                    # embedded literal SQL
+                    push @sqlq, $$v;
+                } else { 
+                    push @sqlq, '?';
+                    push @sqlv, $v;
+                }
+            }
+            push @sql, '(' . join(', ', @sqlq) . ')';
+        } elsif ($ref eq 'SCALAR') {
+            # literal SQL
+            push @sql, $$_;
+        } else {
+            # strings get case twiddled
+            push @sql, $self->_sqlcase($_);
+        }
+    }
+
+    my $sql = join ' ', @sql;
+
+    # this is pretty tricky
+    # if ask for an array, return ($stmt, @bind)
+    # otherwise, s/?/shift @sqlv/ to put it inline
+    if (wantarray) {
+        return ($sql, @sqlv);
+    } else {
+        1 while $sql =~ s/\?/my $d = shift(@sqlv);
+                             ref $d ? $d->[1] : $d/e;
+        return $sql;
+    }
 }
 
 1;
@@ -688,20 +854,30 @@ Which would generate:
     $stmt = "WHERE user = ? AND status != ?";
     @bind = ('nwiger', 'completed');
 
-Note that this can be combined with the arrayref idea, to test for
-values that are within a range:
+The hashref can also contain multiple pairs, in which case it is expanded
+into an AND of its elements:
+
+    my %where  = (
+        user   => 'nwiger',
+        status => { '!=', 'completed', '!=', 'pending' }
+    );
+
+    $stmt = "WHERE user = ? AND status != ? AND status != ?";
+    @bind = ('nwiger', 'completed', 'pending');
+
+To get an OR instead, you can combine it the arrayref idea:
 
     my %where => (
          user => 'nwiger'
-         priority  => [ {'>', 3}, {'<', 1} ],
+         priority  => [ {'=', 2}, {'=', 1} ],
     );
 
 Which would generate:
 
-    $stmt = "WHERE user = ? AND ( priority > ? ) OR ( priority < ? )";
-    @bind = ('nwiger', '3', '1');
+    $stmt = "WHERE user = ? AND ( priority = ? ) OR ( priority = ? )";
+    @bind = ('nwiger', '2', '1');
 
-You can use this same format to compare a list of fields using the
+You can also use the hashref format to compare a list of fields using the
 C<IN> comparison operator, by specifying the list as an arrayref:
 
     my %where  = (
@@ -848,7 +1024,8 @@ There are a number of individuals that have really helped out with
 this module. Unfortunately, most of them submitted bugs via CPAN
 so I have no idea who they are! But the people I do know are
 Mark Stosberg (benchmarking), Chas Owens (initial "IN" operator
-support), and Philip Collins (per-field SQL functions). Thanks!
+support), Philip Collins (per-field SQL functions), and Eric Kolve
+(hashref-AND support). Thanks!
 
 =head1 BUGS
 
@@ -863,14 +1040,15 @@ L<DBIx::Abstract>, L<DBI|DBI>, L<CGI::FormBuilder>, L<HTML::QuickTable>
 
 =head1 VERSION
 
-$Id: Abstract.pm,v 1.15 2003/11/05 23:40:40 nwiger Exp $
+$Id: Abstract.pm,v 1.17 2004/08/25 20:11:27 nwiger Exp $
 
 =head1 AUTHOR
 
-Copyright (c) 2001-2003 Nathan Wiger <nate@sun.com>. All Rights Reserved.
+Copyright (c) 2001-2004 Nathan Wiger <nate@sun.com>. All Rights Reserved.
 
 This module is free software; you may copy this under the terms of
 the GNU General Public License, or the Artistic License, copies of
 which should have accompanied your Perl kit.
 
 =cut
+

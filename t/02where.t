@@ -6,7 +6,7 @@ $TESTING = 1;
 use Test;
 
 # use a BEGIN block so we print our plan before CGI::FormBuilder is loaded
-BEGIN { plan tests => 10 }
+BEGIN { plan tests => 11 }
 
 use SQL::Abstract;
 
@@ -121,6 +121,18 @@ my @handle_tests = (
         order => \'requestor, ticket',
         stmt => " WHERE ( priority BETWEEN ? AND ? AND requestor IS NULL ) ORDER BY requestor, ticket",
         bind => [qw/1 3/],
+    },
+
+    {
+        where => {  
+            id  => 1,
+	    num => {
+	     '<=' => 20,
+	     '>'  => 10,
+	    },
+        },
+        stmt => " WHERE ( id = ? AND num <= ? AND num > ? )",
+        bind => [qw/1 20 10/],
     },
 
 

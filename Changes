@@ -1,15 +1,23 @@
 
 RCS file: /home/nwiger/perlmod/lib/SQL/RCS/Abstract.pm,v
 Working file: /home/nwiger/perlmod/lib/SQL/Abstract.pm
-head: 1.15
+head: 1.17
 branch:
 locks: strict
 access list:
 symbolic names:
 keyword substitution: kv
-total revisions: 15;	selected revisions: 15
+total revisions: 17;	selected revisions: 17
 description:
 SQL::Abstract - Generate SQL from Perl data structures
+----------------------------
+revision 1.17
+date: 2004/08/25 20:11:27;  author: nwiger;  state: Exp;  lines: +58 -46
+added patch from Eric Kolve to iterate over all hashref elements
+----------------------------
+revision 1.16
+date: 2004/06/10 17:20:01;  author: nwiger;  state: Exp;  lines: +178 -12
+added bindtype param to allow this to work with Orasuck 9+
 ----------------------------
 revision 1.15
 date: 2003/11/05 23:40:40;  author: nwiger;  state: Exp;  lines: +18 -6

@@ -6,11 +6,9 @@ $TESTING = 1;
 use Test;
 
 # use a BEGIN block so we print our plan before CGI::FormBuilder is loaded
-BEGIN { plan tests => 22 }
+BEGIN { plan tests => 25 }
 
 use SQL::Abstract;
-
-my $sql = SQL::Abstract->new;
 
 my @tests = (
       #1
@@ -170,18 +168,52 @@ my @tests = (
               stmt => 'INSERT INTO test.table (high_limit, low_limit) VALUES (max(all_limits), ?)',
               bind => ['4'],
       },
+      #23
+      {
+              func => 'insert',
+              new  => {bindtype => 'columns'},
+              args => ['test.table', {one => 2, three => 4, five => 6} ],
+              stmt => 'INSERT INTO test.table (five, one, three) VALUES (?, ?, ?)',
+              bind => [['five', 6], ['one', 2], ['three', 4]],  # alpha order, man...
+      },
+      #24
+      {
+              func => 'select',
+              new  => {bindtype => 'columns', case => 'lower'},
+              args => ['test.table', [qw/one two three/], {one => 2, three => 4, five => 6} ],
+              stmt => 'select one, two, three from test.table where ( five = ? and one = ? and three = ? )',
+              bind => [['five', 6], ['one', 2], ['three', 4]],  # alpha order, man...
+      },
+      #25
+      {
+              func => 'update',
+              new  => {bindtype => 'columns', cmp => 'like'},
+              args => ['testin.table2', {One => 22, Three => 44, FIVE => 66},
+                                        {Beer => 'is', Yummy => '%YES%', IT => ['IS','REALLY','GOOD']}],
+               stmt => 'UPDATE testin.table2 SET FIVE = ?, One = ?, Three = ? WHERE '
+                     . '( Beer LIKE ? AND ( ( IT LIKE ? ) OR ( IT LIKE ? ) OR ( IT LIKE ? ) ) AND Yummy LIKE ? )',
+              bind => [['FIVE', 66], ['One', 22], ['Three', 44], ['Beer','is'],
+                       ['IT','IS'], ['IT','REALLY'], ['IT','GOOD'], ['Yummy','%YES%']],
+      },
 );
+
+use Data::Dumper;
 
 for (@tests) {
       local $"=', ';
+
+      my $new = $_->{new} || {};
+      my $sql = SQL::Abstract->new(%$new);
+
+
       #print "testing with args (@{$_->{args}}): ";
       my $func = $_->{func};
       my($stmt, @bind) = $sql->$func(@{$_->{args}});
       ok($stmt eq $_->{stmt} && equal(\@bind, $_->{bind})) or
               print "got\n",
-                    "[$stmt] [@bind]\n",
+                    "[$stmt] [",Dumper(\@bind),"]\n",
                     "instead of\n",
-                    "[$_->{stmt}] [@{$_->{bind}}]\n\n";
+                    "[$_->{stmt}] [",Dumper($_->{bind}),"]\n\n";
 }
 
 sub equal {
@@ -189,7 +221,12 @@ sub equal {
       return 0 if @$a != @$b;
       for (my $i = 0; $i < $#{$a}; $i++) {
               next if (! defined($a->[$i])) && (! defined($b->[$i]));
-              return 0 if $a->[$i] ne $b->[$i];
+              if (ref $a->[$i] && ref $b->[$i]) {
+                  return 0 if $a->[$i][0] ne $b->[$i][0]
+                           || $a->[$i][1] ne $b->[$i][1];
+              } else {
+                  return 0 if $a->[$i] ne $b->[$i];
+              }
       }
       return 1;
 }
