@@ -1,4 +1,27 @@
-#!/usr/bin/perl -I. -w
+head	1.1;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2005.03.02.23.37.55;	author nwiger;	state Exp;
+branches;
+next	;
+
+
+desc
+@tests
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@#!/usr/bin/perl -I. -w
 
 use strict;
 use vars qw($TESTING);
@@ -12,7 +35,7 @@ use SQL::Abstract;
 
 my $sql = SQL::Abstract->new;
 
-my @data = (
+my @@data = (
     {
         user => 'nwiger',
         name => 'Nathan Wiger',
@@ -65,25 +88,25 @@ my @data = (
 
 my($sth, $stmt);
 my($laststmt, $numfields);
-for my $t (@data) {
+for my $t (@@data) {
       local $"=', ';
 
       $stmt = $sql->insert('yo_table', $t);
-      my @val = $sql->values($t);
-      $numfields ||= @val;
+      my @@val = $sql->values($t);
+      $numfields ||= @@val;
 
-      ok((! $laststmt || $stmt eq $laststmt) && @val == $numfields
-          && equal(\@val, [map { $t->{$_} } sort keys %$t])) or
+      ok((! $laststmt || $stmt eq $laststmt) && @@val == $numfields
+          && equal(\@@val, [map { $t->{$_} } sort keys %$t])) or
               print "got\n",
-                    "[$stmt] [@val]\n",
+                    "[$stmt] [@@val]\n",
                     "instead of\n",
                     "[$t->{stmt}] [stuff]\n\n";
       $laststmt = $stmt;
 }
 
 sub equal {
-      my ($a, $b) = @_;
-      return 0 if @$a != @$b;
+      my ($a, $b) = @@_;
+      return 0 if @@$a != @@$b;
       for (my $i = 0; $i < $#{$a}; $i++) {
               next if (! defined($a->[$i])) && (! defined($b->[$i]));
               return 0 if $a->[$i] ne $b->[$i];
@@ -91,3 +114,4 @@ sub equal {
       return 1;
 }
 
+@

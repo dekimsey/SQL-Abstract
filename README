@@ -218,7 +218,7 @@ FUNCTIONS
         "columns". If you specify "columns", you will get an array that
         looks like this:
 
-            my $sql = SQL::Abstract->new(bindtype => 'keys');
+            my $sql = SQL::Abstract->new(bindtype => 'columns');
             my($stmt, @bind) = $sql->insert(...);
 
             @bind = (
@@ -361,8 +361,6 @@ WHERE CLAUSES
         $stmt = "WHERE user = ? AND ( status = ? OR status = ? OR status = ? )";
         @bind = ('nwiger', 'assigned', 'in-progress', 'pending');
 
-    Note this is NOT compatible with "DBIx::Abstract".
-
     If you want to specify a different type of operator for your comparison,
     you can use a hashref:
 
@@ -376,35 +374,91 @@ WHERE CLAUSES
         $stmt = "WHERE user = ? AND status != ?";
         @bind = ('nwiger', 'completed');
 
-    The hashref can also contain multiple pairs, in which case it is
+    To test against multiple values, just enclose the values in an arrayref:
+
+        status => { '!=', ['assigned', 'in-progress', 'pending'] };
+
+    Which would give you:
+
+        "WHERE status != ? OR status != ? OR status != ?"
+
+    But, this is probably not what you want in this case (look at it). So
+    the hashref can also contain multiple pairs, in which case it is
     expanded into an AND of its elements:
 
         my %where  = (
             user   => 'nwiger',
-            status => { '!=', 'completed', '!=', 'pending' }
+            status => { '!=', 'completed', -not_like => 'pending%' }
         );
 
-        $stmt = "WHERE user = ? AND status != ? AND status != ?";
-        @bind = ('nwiger', 'completed', 'pending');
+        $stmt = "WHERE user = ? AND status != ? AND status NOT LIKE ?";
+        @bind = ('nwiger', 'completed', 'pending%');
 
-    To get an OR instead, you can combine it the arrayref idea:
+    To get an OR instead, you can combine it with the arrayref idea:
 
         my %where => (
-             user => 'nwiger'
-             priority  => [ {'=', 2}, {'=', 1} ],
+             user => 'nwiger',
+             priority => [ {'=', 2}, {'!=', 1} ]
         );
 
     Which would generate:
 
-        $stmt = "WHERE user = ? AND ( priority = ? ) OR ( priority = ? )";
+        $stmt = "WHERE user = ? AND priority = ? OR priority != ?";
         @bind = ('nwiger', '2', '1');
+
+    However, there is a subtle trap if you want to say something like this
+    (notice the "AND"):
+
+        WHERE priority != ? AND priority != ?
+
+    Because, in Perl you *can't* do this:
+
+        priority => { '!=', 2, '!=', 1 }
+
+    As the second "!=" key will obliterate the first. The solution is to use
+    the special "-modifier" form inside an arrayref:
+
+        priority => [ -and => {'!=', 2}, {'!=', 1} ]
+
+    Normally, these would be joined by OR, but the modifier tells it to use
+    "AND" instead. (Hint: You can use this in conjunction with the "logic"
+    option to "new()" in order to change the way your queries work by
+    default.) Important: Note that the "-modifier" goes INSIDE the arrayref,
+    as an extra first element. This will NOT do what you think it might:
+
+        priority => -and => [{'!=', 2}, {'!=', 1}]   # WRONG!
+
+    Here is a quick list of equivalencies, since there is some overlap:
+
+        # Same
+        status => {'!=', 'completed', 'not like', 'pending%' }
+        status => [ -and => {'!=', 'completed'}, {'not like', 'pending%'}]
+
+        # Same
+        status => {'=', ['assigned', 'in-progress']}
+        status => [ -or => {'=', 'assigned'}, {'=', 'in-progress'}]
+        status => [ {'=', 'assigned'}, {'=', 'in-progress'} ]
+
+    In addition to "-and" and "-or", there is also a special "-nest"
+    operator which adds an additional set of parens, to create a subquery.
+    For example, to get something like this:
+
+        $stmt = WHERE user = ? AND ( workhrs > ? OR geo = ? )
+        @bind = ('nwiger', '20', 'ASIA');
+
+    You would do:
+
+        my %where = (
+             user => 'nwiger',
+            -nest => [ workhrs => {'>', 20}, geo => 'ASIA' ],
+        );
 
     You can also use the hashref format to compare a list of fields using
     the "IN" comparison operator, by specifying the list as an arrayref:
 
         my %where  = (
             status   => 'completed',
-            reportid => { 'in', [567, 2335, 2] }
+            reportid => { -in => [567, 2335, 2] }
         );
 
     Which would generate:
@@ -418,22 +472,22 @@ WHERE CLAUSES
         my %where  = (
             user   => 'nwiger',
             completion_date => {
-                'not between', ['2002-10-01', '2003-02-06']
+               -not_between => ['2002-10-01', '2003-02-06']
             }
         );
 
     Would give you:
 
-        WHERE user = ? AND completion_date NOT BETWEEN ? AND ?
+        WHERE user = ? AND completion_date NOT BETWEEN ( ? AND ? )
 
-    So far, we've seen how multiple conditions are joined with "AND".
-    However, we can change this by putting the different conditions we want
-    in hashes and then putting those hashes in an array. For example:
+    So far, we've seen how multiple conditions are joined with a top-level
+    "AND". We can change this by putting the different conditions we want in
+    hashes and then putting those hashes in an array. For example:
 
         my @where = (
             {
                 user   => 'nwiger',
-                status => ['pending', 'dispatched'],
+                status => { -like => ['pending%', 'dispatched'] },
             },
             {
                 user   => 'robot',
@@ -443,14 +497,33 @@ WHERE CLAUSES
 
     This data structure would create the following:
 
-        $stmt = "WHERE ( user = ? AND ( status = ? OR status = ? ) )
+        $stmt = "WHERE ( user = ? AND ( status LIKE ? OR status LIKE ? ) )
                     OR ( user = ? AND status = ? ) )";
         @bind = ('nwiger', 'pending', 'dispatched', 'robot', 'unassigned');
+
+    This can be combined with the "-nest" operator to properly group SQL
+    statements:
+
+        my @where = (
+             -and => [
+                user => 'nwiger',
+                -nest => [
+                    -and => [workhrs => {'>', 20}, geo => 'ASIA' ],
+                    -and => [workhrs => {'<', 50}, geo => 'EURO' ]
+                ],
+            ],
+        );
+
+    That would yield:
+
+        WHERE ( user = ? AND 
+              ( ( workhrs > ? AND geo = ? )
+             OR ( workhrs < ? AND geo = ? ) ) )
 
     Finally, sometimes only literal SQL will do. If you want to include
     literal SQL verbatim, you can specify it as a scalar reference, namely:
 
-        my $inn = 'is not null';
+        my $inn = 'is Not Null';
         my %where = (
             priority => { '<', 2 },
             requestor => \$inn
@@ -458,17 +531,17 @@ WHERE CLAUSES
 
     This would create:
 
-        $stmt = "WHERE priority < ? AND requestor is not null";
+        $stmt = "WHERE priority < ? AND requestor is Not Null";
         @bind = ('2');
 
-    Note you only get one bind parameter back, since the verbatim SQL is
-    passed back as part of the statement.
+    Note that in this example, you only get one bind parameter back, since
+    the verbatim SQL is passed as part of the statement.
 
     Of course, just to prove a point, the above can also be accomplished
     with this:
 
         my %where = (
-            priority => { '<', 2 },
+            priority  => { '<', 2 },
             requestor => { '!=', undef },
         );
 
@@ -524,7 +597,8 @@ FORMBUILDER
 
         if ($form->submitted) {
             my $field = $form->field;
-            my($stmt, @bind) = $sql->select('table', '*', $field);
+            my $id = delete $field->{id};
+            my($stmt, @bind) = $sql->update('table', $field, {id => $id});
         }
 
     Of course, you would still have to connect using "DBI" to run the query,
@@ -535,18 +609,43 @@ FORMBUILDER
     interface to returning and formatting data. I frequently use these three
     modules together to write complex database query apps in under 50 lines.
 
+NOTES
+    There is not (yet) any explicit support for SQL compound logic
+    statements like "AND NOT". Instead, just do the de Morgan's law
+    transformations yourself. For example, this:
+
+      "lname LIKE '%son%' AND NOT ( age < 10 OR age > 20 )"
+
+    Becomes:
+
+      "lname LIKE '%son%' AND ( age >= 10 AND age <= 20 )"
+
+    With the corresponding "%where" hash:
+
+        %where = (
+            lname => {like => '%son%'},
+            age   => [-and => {'>=', 10}, {'<=', 20}],
+        );
+
+    Again, remember that the "-and" goes *inside* the arrayref.
+
 ACKNOWLEDGEMENTS
     There are a number of individuals that have really helped out with this
     module. Unfortunately, most of them submitted bugs via CPAN so I have no
-    idea who they are! But the people I do know are Mark Stosberg
-    (benchmarking), Chas Owens (initial "IN" operator support), Philip
-    Collins (per-field SQL functions), and Eric Kolve (hashref-AND support).
+    idea who they are! But the people I do know are:
+
+        Mark Stosberg (benchmarking)
+        Chas Owens (initial "IN" operator support)
+        Philip Collins (per-field SQL functions)
+        Eric Kolve (hashref "AND" support)
+        Mike Fragassi (enhancements to "BETWEEN" and "LIKE")
+
     Thanks!
 
 BUGS
     If found, please DO NOT submit anything via "rt.cpan.org" - that just
     causes me a ton of work. Email me a patch (or script demonstrating the
-    problem) at the below address, and include the VERSION string you'll be
+    problem) to the below address, and include the VERSION string you'll be
     seeing shortly.
 
 SEE ALSO
@@ -554,10 +653,10 @@ SEE ALSO
     HTML::QuickTable manpage
 
 VERSION
-    $Id: Abstract.pm,v 1.17 2004/08/25 20:11:27 nwiger Exp $
+    $Id: Abstract.pm,v 1.18 2005/03/07 20:14:12 nwiger Exp $
 
 AUTHOR
-    Copyright (c) 2001-2004 Nathan Wiger <nate@sun.com>. All Rights
+    Copyright (c) 2001-2005 Nathan Wiger <nate@sun.com>. All Rights
     Reserved.
 
     This module is free software; you may copy this under the terms of the

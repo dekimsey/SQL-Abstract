@@ -1,4 +1,32 @@
-#!/usr/bin/perl -I. -w
+head	1.2;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2005.03.02.23.46.09;	author nwiger;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.03.02.23.37.55;	author nwiger;	state Exp;
+branches;
+next	;
+
+
+desc
+@tests
+@
+
+
+1.2
+log
+@between fixes
+@
+text
+@#!/usr/bin/perl -I. -w
 
 use strict;
 use vars qw($TESTING);
@@ -10,7 +38,7 @@ BEGIN { plan tests => 30 }
 
 use SQL::Abstract;
 
-my @tests = (
+my @@tests = (
       #1
       {
               func => 'select',
@@ -247,26 +275,26 @@ my @tests = (
 
 use Data::Dumper;
 
-for (@tests) {
+for (@@tests) {
       local $"=', ';
 
       my $new = $_->{new} || {};
       $new->{debug} = $ENV{DEBUG} || 0;
       my $sql = SQL::Abstract->new(%$new);
 
-      #print "testing with args (@{$_->{args}}): ";
+      #print "testing with args (@@{$_->{args}}): ";
       my $func = $_->{func};
-      my($stmt, @bind) = $sql->$func(@{$_->{args}});
-      ok($stmt eq $_->{stmt} && equal(\@bind, $_->{bind})) or
+      my($stmt, @@bind) = $sql->$func(@@{$_->{args}});
+      ok($stmt eq $_->{stmt} && equal(\@@bind, $_->{bind})) or
               print "got\n",
-                    "[$stmt] [",Dumper(\@bind),"]\n",
+                    "[$stmt] [",Dumper(\@@bind),"]\n",
                     "instead of\n",
                     "[$_->{stmt}] [",Dumper($_->{bind}),"]\n\n";
 }
 
 sub equal {
-      my ($a, $b) = @_;
-      return 0 if @$a != @$b;
+      my ($a, $b) = @@_;
+      return 0 if @@$a != @@$b;
       for (my $i = 0; $i < $#{$a}; $i++) {
               next if (! defined($a->[$i])) && (! defined($b->[$i]));
               if (ref $a->[$i] && ref $b->[$i]) {
@@ -280,3 +308,21 @@ sub equal {
 }
 
 
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d74 1
+a74 1
+              stmt => 'SELECT * FROM test WHERE ( a BETWEEN ( ? AND ? ) )',
+d161 1
+a161 1
+              stmt => 'UPDATE test SET a = ?, b = to_date(?, \'MM/DD/YY\') WHERE ( a BETWEEN ( ? AND ? ) )',
+d231 1
+a231 1
+              stmt => 'SELECT * FROM jeff WHERE ( ( ( ( ( ( ( age BETWEEN ( ? AND ? ) ) AND ( age != ? ) ) ) OR ( yob < ? ) ) ) )'
+@

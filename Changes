@@ -1,15 +1,19 @@
 
 RCS file: /home/nwiger/perlmod/lib/SQL/RCS/Abstract.pm,v
 Working file: /home/nwiger/perlmod/lib/SQL/Abstract.pm
-head: 1.17
+head: 1.18
 branch:
 locks: strict
 access list:
 symbolic names:
 keyword substitution: kv
-total revisions: 17;	selected revisions: 17
+total revisions: 18;	selected revisions: 18
 description:
 SQL::Abstract - Generate SQL from Perl data structures
+----------------------------
+revision 1.18
+date: 2005/03/07 20:14:12;  author: nwiger;  state: Exp;  lines: +201 -65
+added support for -and, -or, and -nest; see docs for details
 ----------------------------
 revision 1.17
 date: 2004/08/25 20:11:27;  author: nwiger;  state: Exp;  lines: +58 -46

@@ -1,4 +1,32 @@
-#!/usr/bin/perl -I. -w
+head	1.2;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	2005.03.02.23.46.09;	author nwiger;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.03.02.23.37.55;	author nwiger;	state Exp;
+branches;
+next	;
+
+
+desc
+@tests
+@
+
+
+1.2
+log
+@between fixes
+@
+text
+@#!/usr/bin/perl -I. -w
 
 use strict;
 use vars qw($TESTING);
@@ -13,7 +41,7 @@ use SQL::Abstract;
 # Make sure to test the examples, since having them break is somewhat
 # embarrassing. :-(
 
-my @handle_tests = (
+my @@handle_tests = (
     {
         where => {
             requestor => 'inna',
@@ -150,19 +178,37 @@ my @handle_tests = (
 
 );
 
-for (@handle_tests) {
+for (@@handle_tests) {
       local $" = ', ';
       #print "creating a handle with args ($_->{args}): ";
       my $sql = SQL::Abstract->new;
-      my($stmt, @bind) = $sql->where($_->{where}, $_->{order});
+      my($stmt, @@bind) = $sql->where($_->{where}, $_->{order});
       my $bad = 0;
-      for(my $i=0; $i < @{$_->{bind}}; $i++) {
+      for(my $i=0; $i < @@{$_->{bind}}; $i++) {
          $bad++ unless $_->{bind}[$i] eq $bind[$i];
       }
-      ok($stmt eq $_->{stmt} && @bind == @{$_->{bind}} && ! $bad) or 
+      ok($stmt eq $_->{stmt} && @@bind == @@{$_->{bind}} && ! $bad) or 
               print "got\n",
-                    "[$stmt] [@bind]\n",
+                    "[$stmt] [@@bind]\n",
                     "instead of\n",
-                    "[$_->{stmt}] [@{$_->{bind}}]\n\n";
+                    "[$_->{stmt}] [@@{$_->{bind}}]\n\n";
 }
 
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d140 1
+a140 1
+        where => { foo => {'not like' => [7,8,9]},
+d145 1
+a145 1
+                   wux => {'not in'  => [qw/30 40/]}
+d147 1
+a147 1
+        stmt => " WHERE ( ( ( foo not like ? ) OR ( foo not like ? ) OR ( foo not like ? ) ) AND ( ( fum like ? ) OR ( fum like ? ) ) AND nix BETWEEN ? AND ? AND nox NOT BETWEEN ? AND ? AND wix IN ( ?, ? ) AND wux NOT IN ( ?, ? ) )",
+@

@@ -7,3 +7,7 @@ t/00new.t
 t/01generate.t
 t/02where.t
 t/03values.t
+t/RCS/00new.t,v
+t/RCS/01generate.t,v
+t/RCS/02where.t,v
+t/RCS/03values.t,v
