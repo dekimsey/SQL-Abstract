@@ -202,7 +202,7 @@ SEE ALSO
     DBIx::Abstract, SQL::Statement
 
 VERSION
-    $Id: Abstract.pm,v 1.9 2002/08/29 18:04:35 nwiger Exp $
+    $Id: Abstract.pm,v 1.10 2002/09/27 18:06:25 nwiger Exp $
 
 AUTHOR
     Copyright (c) 2001 Nathan Wiger <nate@sun.com>. All Rights Reserved.

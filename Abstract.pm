@@ -72,7 +72,7 @@ use Carp;
 use strict;
 use vars qw($VERSION %SQL);
 
-$VERSION = do { my @r=(q$Revision: 1.9 $=~/\d+/g); sprintf "%d."."%02d"x$#r,@r };
+$VERSION = do { my @r=(q$Revision: 1.10 $=~/\d+/g); sprintf "%d."."%02d"x$#r,@r };
 
 # Constant holding SQL statements. Needed for driver support
 %SQL = (
@@ -310,9 +310,13 @@ sub where {
     my $self  = shift;
     my $where = shift;
 
+    # precatch for literal string
+    return $where unless ref $where;
+
     # need a separate routine to properly wrap w/ "where"
     my $join = ref $where eq 'ARRAY' ? $SQL{or} : $SQL{and};
     my @ret = $self->_recurse_where($where, $join);
+
     return unless @ret;
     my $sql = shift @ret;
     $sql = " $SQL{where} " . $sql if $sql;
@@ -485,7 +489,7 @@ L<DBIx::Abstract>, L<SQL::Statement>
 
 =head1 VERSION
 
-$Id: Abstract.pm,v 1.9 2002/08/29 18:04:35 nwiger Exp $
+$Id: Abstract.pm,v 1.10 2002/09/27 18:06:25 nwiger Exp $
 
 =head1 AUTHOR
 
