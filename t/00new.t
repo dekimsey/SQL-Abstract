@@ -6,7 +6,7 @@ $TESTING = 1;
 use Test;
 
 # use a BEGIN block so we print our plan before CGI::FormBuilder is loaded
-BEGIN { plan tests => 12 }
+BEGIN { plan tests => 14 }
 
 use SQL::Abstract;
 
@@ -71,17 +71,33 @@ my @handle_tests = (
               args => {convert => "Round"},
               stmt => 'SELECT * FROM test WHERE ( ROUND(a) = ROUND(?) AND ROUND(b) = ROUND(?) )',
       },
+      #13
+      {
+              args => {convert => "lower"},
+              stmt => 'SELECT * FROM test WHERE ( ( LOWER(ticket) = LOWER(?) ) OR ( LOWER(hostname) = LOWER(?) ) OR ( LOWER(taco) = LOWER(?) ) OR ( LOWER(salami) = LOWER(?) ) )',
+              bind => [ { ticket => 11 }, { hostname => 11 }, { taco => 'salad' }, { salami => 'punch' } ],
+      },
+      #14
+      {
+              args => {convert => "upper"},
+              stmt => 'SELECT * FROM test WHERE ( ( UPPER(hostname) IN ( UPPER(?), UPPER(?), UPPER(?), UPPER(?) ) AND ( ( UPPER(ticket) = UPPER(?) ) OR ( UPPER(ticket) = UPPER(?) ) OR ( UPPER(ticket) = UPPER(?) ) ) ) OR ( UPPER(tack) BETWEEN UPPER(?) AND UPPER(?) ) OR ( ( ( UPPER(a) = UPPER(?) ) OR ( UPPER(a) = UPPER(?) ) OR ( UPPER(a) = UPPER(?) ) ) AND ( ( UPPER(e) != UPPER(?) ) OR ( UPPER(e) != UPPER(?) ) ) AND UPPER(q) NOT IN ( UPPER(?), UPPER(?), UPPER(?), UPPER(?), UPPER(?), UPPER(?), UPPER(?) ) ) )',
+              bind => [ { ticket => [11, 12, 13], hostname => { in => ['ntf', 'avd', 'bvd', '123'] } },
+                        { tack => { between => [qw/tick tock/] } },
+                        { a => [qw/b c d/], e => { '!=', [qw(f g)] }, q => { 'not in', [14..20] } } ],
+      },
 );
 
 for (@handle_tests) {
       local $" = ', ';
       #print "creating a handle with args ($_->{args}): ";
-      my $sql = SQL::Abstract->new($_->{args});
-      my($stmt, @bind) = $sql->select('test', '*', { a => 4, b => 0});
-      ok($stmt eq $_->{stmt} && $bind[0] == 4 && $bind[1] == 0) or 
+      my $sql  = SQL::Abstract->new($_->{args});
+      my $bind = $_->{bind} || { a => 4, b => 0};
+      my($stmt, @bind) = $sql->select('test', '*', $bind);
+      ok($stmt eq $_->{stmt} && @bind) or 
               warn "got\n",
                     "[$stmt], [@bind]\n",
                     "instead of\n",
                     "[$_->{stmt}] [4, 0]\n\n";
 }
+
 

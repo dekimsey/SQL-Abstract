@@ -144,7 +144,7 @@ use Carp;
 use strict;
 use vars qw($VERSION %SQL);
 
-$VERSION = do { my @r=(q$Revision: 1.14 $=~/\d+/g); sprintf "%d."."%02d"x$#r,@r };
+$VERSION = do { my @r=(q$Revision: 1.15 $=~/\d+/g); sprintf "%d."."%02d"x$#r,@r };
 
 # Fix SQL case, if so requested
 sub _sqlcase {
@@ -502,8 +502,8 @@ sub _recurse_where {
                 $el = {$el => shift(@$where)};
             }
             my @ret = $self->_recurse_where($el, $subjoin);
-            push @sqlf, $self->_convert(shift @ret);
-            push @sqlv, $self->_convert(@ret);
+            push @sqlf, shift @ret;
+            push @sqlv, @ret;
         }
     }
     elsif ($ref eq 'HASH') {
@@ -523,8 +523,8 @@ sub _recurse_where {
                 my @ret = $self->_recurse_where(\@w, $self->_sqlcase('or'));
 
                 # push results into our structure
-                push @sqlf, $self->_convert(shift @ret);
-                push @sqlv, $self->_convert(@ret);
+                push @sqlf, shift @ret;
+                push @sqlv, @ret;
             } elsif (ref $v eq 'HASH') {
                 # modified operator { '!=', 'completed' }
                 my($f,$x) = each %$v;
@@ -543,6 +543,18 @@ sub _recurse_where {
                                     ')';
                     }
                     push @sqlv, @$x;
+                } elsif (ref $x eq 'ARRAY') {
+                    # multiple elements: multiple options
+                    $self->_debug("ARRAY($x) means multiple elements: [ @$x ]");
+
+                    # map into an array of hashrefs and recurse
+                    my @w = ();
+                    push @w, { $k => { $f => $_ } } for @$x;
+                    my @ret = $self->_recurse_where(\@w, $self->_sqlcase('or'));
+
+                    # push results into our structure
+                    push @sqlf, shift @ret;
+                    push @sqlv, @ret;
                 } elsif (! defined($x)) {
                     # undef = NOT null
                     my $not = ($f eq '!=' || $f eq 'not like') ? ' not' : '';
@@ -851,7 +863,7 @@ L<DBIx::Abstract>, L<DBI|DBI>, L<CGI::FormBuilder>, L<HTML::QuickTable>
 
 =head1 VERSION
 
-$Id: Abstract.pm,v 1.14 2003/11/04 21:20:33 nwiger Exp $
+$Id: Abstract.pm,v 1.15 2003/11/05 23:40:40 nwiger Exp $
 
 =head1 AUTHOR
 

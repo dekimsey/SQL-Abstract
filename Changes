@@ -1,15 +1,20 @@
 
 RCS file: /home/nwiger/perlmod/lib/SQL/RCS/Abstract.pm,v
 Working file: /home/nwiger/perlmod/lib/SQL/Abstract.pm
-head: 1.14
+head: 1.15
 branch:
 locks: strict
 access list:
 symbolic names:
 keyword substitution: kv
-total revisions: 14;	selected revisions: 14
+total revisions: 15;	selected revisions: 15
 description:
 SQL::Abstract - Generate SQL from Perl data structures
+----------------------------
+revision 1.15
+date: 2003/11/05 23:40:40;  author: nwiger;  state: Exp;  lines: +18 -6
+several bugfixes, including _convert being applied wrong and
+the edge case field => { '!=', [qw/this that/] } not working
 ----------------------------
 revision 1.14
 date: 2003/11/04 21:20:33;  author: nwiger;  state: Exp;  lines: +115 -34
