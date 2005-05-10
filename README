@@ -26,20 +26,19 @@ SYNOPSIS
         my @bind = $sql->values(\%fieldvals);
 
 DESCRIPTION
-    This module was inspired by the excellent the DBIx::Abstract manpage.
-    However, in using that module I found that what I really wanted to do
-    was generate SQL, but still retain complete control over my statement
-    handles and use the DBI interface. So, I set out to create an abstract
-    SQL generation module.
+    This module was inspired by the excellent DBIx::Abstract. However, in
+    using that module I found that what I really wanted to do was generate
+    SQL, but still retain complete control over my statement handles and use
+    the DBI interface. So, I set out to create an abstract SQL generation
+    module.
 
-    While based on the concepts used by the DBIx::Abstract manpage, there
-    are several important differences, especially when it comes to WHERE
-    clauses. I have modified the concepts used to make the SQL easier to
-    generate from Perl data structures and, IMO, more intuitive. The
-    underlying idea is for this module to do what you mean, based on the
-    data structures you provide it. The big advantage is that you don't have
-    to modify your code every time your data changes, as this module figures
-    it out.
+    While based on the concepts used by DBIx::Abstract, there are several
+    important differences, especially when it comes to WHERE clauses. I have
+    modified the concepts used to make the SQL easier to generate from Perl
+    data structures and, IMO, more intuitive. The underlying idea is for
+    this module to do what you mean, based on the data structures you
+    provide it. The big advantage is that you don't have to modify your code
+    every time your data changes, as this module figures it out.
 
     To begin with, an SQL INSERT is as easy as just specifying a hash of
     "key=value" pairs:
@@ -69,7 +68,7 @@ DESCRIPTION
         my $sth = $dbh->prepare($stmt);
         $sth->execute(@bind);
 
-    In addition, you can apply SQL functions to elements of your "%data" by
+    In addition, you can apply SQL functions to elements of your %data by
     specifying an arrayref for the given hash value. For example, if you
     need to execute the Oracle "to_date" function on a value, you can say
     something like this:
@@ -92,10 +91,10 @@ DESCRIPTION
 
         my($stmt, @bind) = $sql->update('people', \%data);
 
-    Notice that your "%data" isn't touched; the module will generate the
+    Notice that your %data isn't touched; the module will generate the
     appropriately quirky SQL for you automatically. Usually you'll want to
     specify a WHERE clause for your UPDATE, though, which is where handling
-    "%where" hashes comes in handy...
+    %where hashes comes in handy...
 
     This module can generate pretty complicated WHERE statements easily. For
     example, simple "key=value" pairs are taken to mean equality, and if you
@@ -132,7 +131,6 @@ FUNCTIONS
     and simplify things.
 
   new(case => 'lower', cmp => 'like', logic => 'and', convert => 'upper')
-
     The "new()" function takes a list of options and values, and returns a
     new SQL::Abstract object which can then be used to generate SQL through
     the methods below. The options accepted are:
@@ -158,7 +156,7 @@ FUNCTIONS
             WHERE name like 'nwiger' AND email like 'nate@wiger.org'
 
         You can also override the comparsion on an individual basis - see
-        the huge section on the section on "WHERE CLAUSES" at the bottom.
+        the huge section on "WHERE CLAUSES" at the bottom.
 
     logic
         This determines the default logical operator for multiple WHERE
@@ -209,11 +207,11 @@ FUNCTIONS
             $sth->bind_param(1, 'reg data');
             $sth->bind_param(2, $lots, {ora_type => ORA_CLOB});
 
-        The problem is, SQL::Abstract will normally just return a "@bind"
+        The problem is, SQL::Abstract will normally just return a @bind
         array, which loses track of which field each slot refers to. Fear
         not.
 
-        If you specify "bindtype" in new, you can determine how "@bind" is
+        If you specify "bindtype" in new, you can determine how @bind is
         returned. Currently, you can specify either "normal" (default) or
         "columns". If you specify "columns", you will get an array that
         looks like this:
@@ -253,44 +251,37 @@ FUNCTIONS
         manual SQL specification.
 
   insert($table, \@values || \%fieldvals)
-
     This is the simplest function. You simply give it a table name and
     either an arrayref of values or hashref of field/value pairs. It returns
     an SQL INSERT statement and a list of bind values.
 
   update($table, \%fieldvals, \%where)
-
     This takes a table, hashref of field/value pairs, and an optional
     hashref WHERE clause. It returns an SQL UPDATE function and a list of
     bind values.
 
   select($table, \@fields, \%where, \@order)
-
     This takes a table, arrayref of fields (or '*'), optional hashref WHERE
     clause, and optional arrayref order by, and returns the corresponding
     SQL SELECT statement and list of bind values.
 
   delete($table, \%where)
-
     This takes a table name and optional hashref WHERE clause. It returns an
     SQL DELETE statement and list of bind values.
 
   where(\%where, \@order)
-
     This is used to generate just the WHERE clause. For example, if you have
     an arbitrary data structure and know what the rest of your SQL is going
     to look like, but want an easy way to produce a WHERE clause, use this.
     It returns an SQL WHERE clause and list of bind values.
 
   values(\%data)
-
-    This just returns the values from the hash "%data", in the same order
-    that would be returned from any of the other above queries. Using this
-    allows you to markedly speed up your queries if you are affecting lots
-    of rows. See below under the the section on "PERFORMANCE" section.
+    This just returns the values from the hash %data, in the same order that
+    would be returned from any of the other above queries. Using this allows
+    you to markedly speed up your queries if you are affecting lots of rows.
+    See below under the "PERFORMANCE" section.
 
   generate($any, 'number', $of, \@data, $struct, \%types)
-
     Warning: This is an experimental method and subject to change.
 
     This returns arbitrarily generated SQL. It's a really basic shortcut. It
@@ -323,17 +314,16 @@ FUNCTIONS
     remains verbatim.
 
 WHERE CLAUSES
-    This module uses a variation on the idea from the DBIx::Abstract
-    manpage. It is NOT, repeat *not* 100% compatible. The main logic of this
-    module is that things in arrays are OR'ed, and things in hashes are
-    AND'ed.
+    This module uses a variation on the idea from DBIx::Abstract. It is NOT,
+    repeat *not* 100% compatible. The main logic of this module is that
+    things in arrays are OR'ed, and things in hashes are AND'ed.
 
     The easiest way to explain is to show lots of examples. After each
-    "%where" hash shown, it is assumed you used:
+    %where hash shown, it is assumed you used:
 
         my($stmt, @bind) = $sql->where(\%where);
 
-    However, note that the "%where" hash can be used directly in any of the
+    However, note that the %where hash can be used directly in any of the
     other functions as well, as described above.
 
     So, let's get started. To begin, a simple hash:
@@ -362,7 +352,7 @@ WHERE CLAUSES
         @bind = ('nwiger', 'assigned', 'in-progress', 'pending');
 
     If you want to specify a different type of operator for your comparison,
-    you can use a hashref:
+    you can use a hashref for a given column:
 
         my %where  = (
             user   => 'nwiger',
@@ -384,13 +374,19 @@ WHERE CLAUSES
 
     But, this is probably not what you want in this case (look at it). So
     the hashref can also contain multiple pairs, in which case it is
-    expanded into an AND of its elements:
+    expanded into an "AND" of its elements:
 
         my %where  = (
             user   => 'nwiger',
             status => { '!=', 'completed', -not_like => 'pending%' }
         );
 
+        # Or more dynamically, like from a form
+        $where{user} = 'nwiger';
+        $where{status}{'!='} = 'completed';
+        $where{status}{'-not_like'} = 'pending%';
+
+        # Both generate this
         $stmt = "WHERE user = ? AND status != ? AND status NOT LIKE ?";
         @bind = ('nwiger', 'completed', 'pending%');
 
@@ -420,11 +416,12 @@ WHERE CLAUSES
 
         priority => [ -and => {'!=', 2}, {'!=', 1} ]
 
-    Normally, these would be joined by OR, but the modifier tells it to use
-    "AND" instead. (Hint: You can use this in conjunction with the "logic"
-    option to "new()" in order to change the way your queries work by
-    default.) Important: Note that the "-modifier" goes INSIDE the arrayref,
-    as an extra first element. This will NOT do what you think it might:
+    Normally, these would be joined by "OR", but the modifier tells it to
+    use "AND" instead. (Hint: You can use this in conjunction with the
+    "logic" option to "new()" in order to change the way your queries work
+    by default.) Important: Note that the "-modifier" goes INSIDE the
+    arrayref, as an extra first element. This will NOT do what you think it
+    might:
 
         priority => -and => [{'!=', 2}, {'!=', 1}]   # WRONG!
 
@@ -576,7 +573,7 @@ PERFORMANCE
             $sth->execute($sql->values($href));
         }
 
-    The reason this works is because the keys in your "$href" are sorted
+    The reason this works is because the keys in your $href are sorted
     internally by SQL::Abstract. Thus, as long as your data retains the same
     structure, you only have to generate the SQL the first time around. On
     subsequent queries, simply use the "values" function provided by this
@@ -620,7 +617,7 @@ NOTES
 
       "lname LIKE '%son%' AND ( age >= 10 AND age <= 20 )"
 
-    With the corresponding "%where" hash:
+    With the corresponding %where hash:
 
         %where = (
             lname => {like => '%son%'},
@@ -649,11 +646,10 @@ BUGS
     seeing shortly.
 
 SEE ALSO
-    the DBIx::Abstract manpage, DBI, the CGI::FormBuilder manpage, the
-    HTML::QuickTable manpage
+    DBIx::Abstract, DBI, CGI::FormBuilder, HTML::QuickTable
 
 VERSION
-    $Id: Abstract.pm,v 1.18 2005/03/07 20:14:12 nwiger Exp $
+    $Id: Abstract.pm,v 1.19 2005/04/29 18:20:30 nwiger Exp $
 
 AUTHOR
     Copyright (c) 2001-2005 Nathan Wiger <nate@sun.com>. All Rights

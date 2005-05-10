@@ -143,19 +143,22 @@ clause) to try and simplify things.
 
 use Carp;
 use strict;
-use vars qw($VERSION @ISA @EXPORT_OK %EXPORT_TAGS);
+use vars qw($VERSION $AUTOLOAD);
 
-$VERSION = do { my @r=(q$Revision: 1.18 $=~/\d+/g); sprintf "%d."."%02d"x$#r,@r };
-
-use Exporter;
-@ISA = qw(Exporter);
-@EXPORT_OK   = qw(AND OR NEST);
-%EXPORT_TAGS = (constants => [qw(AND OR NEST)]);
+$VERSION = do { my @r=(q$Revision: 1.19 $=~/\d+/g); sprintf "%d."."%02d"x$#r,@r };
 
 # Fix SQL case, if so requested
 sub _sqlcase {
     my $self = shift;
     return $self->{case} ? $_[0] : uc($_[0]);
+}
+
+# Anon copies of arrays/hashes
+sub _anoncopy {
+    my $orig = shift;
+    return (ref $orig eq 'HASH' ) ? { %$orig }
+         : (ref $orig eq 'ARRAY') ? [ @$orig ]
+         : $orig;     # rest passthru ok
 }
 
 # Debug
@@ -528,7 +531,7 @@ sub where {
     my $where = shift;
     my $order = shift;
 
-    # need a separate routine to properly wrap w/ "where"
+    # Need a separate routine to properly wrap w/ "where"
     my $sql = '';
     my @ret = $self->_recurse_where($where);
     if (@ret) {
@@ -544,10 +547,11 @@ sub where {
     return wantarray ? ($sql, @ret) : $sql; 
 }
 
+
 sub _recurse_where {
     local $^W = 0;  # really, you've gotta be fucking kidding me
     my $self  = shift;
-    my $where = shift;
+    my $where = _anoncopy(shift);   # prevent destroying original
     my $ref   = ref $where || '';
     my $join  = shift || $self->{logic} ||
                     ($ref eq 'ARRAY' ? $self->_sqlcase('or') : $self->_sqlcase('and'));
@@ -613,9 +617,7 @@ sub _recurse_where {
                 }
 
                 # map into an array of hashrefs and recurse
-                my @w = ();
-                push @w, { $k => $_ } for @$v;
-                my @ret = $self->_recurse_where(\@w, $subjoin);
+                my @ret = $self->_recurse_where([map { {$k => $_} } @$v], $subjoin);
 
                 # push results into our structure
                 push @sqlf, shift @ret;
@@ -646,9 +648,7 @@ sub _recurse_where {
                               $self->_debug("ARRAY($x) means multiple elements: [ @$x ]");
                               
                               # map into an array of hashrefs and recurse
-                              my @w = ();
-                              push @w, { $k => { $f => $_ } } for @$x;
-                              my @ret = $self->_recurse_where(\@w, $self->_sqlcase('or'));
+                              my @ret = $self->_recurse_where([map { {$k => {$f, $_}} } @$x]);
                               
                               # push results into our structure
                               push @sqlf, shift @ret;
@@ -829,6 +829,14 @@ sub generate {
     }
 }
 
+sub DESTROY { 1 }
+sub AUTOLOAD {
+    # This allows us to check for a local, then _form, attr
+    my $self = shift;
+    my($name) = $AUTOLOAD =~ /.*::(.+)/;
+    return $self->generate($name, @_);
+}
+
 1;
 
 __END__
@@ -875,7 +883,7 @@ This simple code will create the following:
     @bind = ('nwiger', 'assigned', 'in-progress', 'pending');
 
 If you want to specify a different type of operator for your comparison,
-you can use a hashref:
+you can use a hashref for a given column:
 
     my %where  = (
         user   => 'nwiger',
@@ -897,13 +905,19 @@ Which would give you:
 
 But, this is probably not what you want in this case (look at it). So
 the hashref can also contain multiple pairs, in which case it is expanded
-into an AND of its elements:
+into an C<AND> of its elements:
 
     my %where  = (
         user   => 'nwiger',
         status => { '!=', 'completed', -not_like => 'pending%' }
     );
 
+    # Or more dynamically, like from a form
+    $where{user} = 'nwiger';
+    $where{status}{'!='} = 'completed';
+    $where{status}{'-not_like'} = 'pending%';
+
+    # Both generate this
     $stmt = "WHERE user = ? AND status != ? AND status NOT LIKE ?";
     @bind = ('nwiger', 'completed', 'pending%');
 
@@ -920,7 +934,7 @@ Which would generate:
     @bind = ('nwiger', '2', '1');
 
 However, there is a subtle trap if you want to say something like
-this (notice the "AND"):
+this (notice the C<AND>):
 
     WHERE priority != ? AND priority != ?
 
@@ -933,7 +947,7 @@ is to use the special C<-modifier> form inside an arrayref:
 
     priority => [ -and => {'!=', 2}, {'!=', 1} ]
 
-Normally, these would be joined by OR, but the modifier tells it
+Normally, these would be joined by C<OR>, but the modifier tells it
 to use C<AND> instead. (Hint: You can use this in conjunction with the
 C<logic> option to C<new()> in order to change the way your queries
 work by default.) B<Important:> Note that the C<-modifier> goes
@@ -1176,7 +1190,7 @@ L<DBIx::Abstract>, L<DBI|DBI>, L<CGI::FormBuilder>, L<HTML::QuickTable>
 
 =head1 VERSION
 
-$Id: Abstract.pm,v 1.18 2005/03/07 20:14:12 nwiger Exp $
+$Id: Abstract.pm,v 1.19 2005/04/29 18:20:30 nwiger Exp $
 
 =head1 AUTHOR
 

@@ -6,7 +6,8 @@ $TESTING = 1;
 use Test;
 
 # use a BEGIN block so we print our plan before SQL::Abstract is loaded
-BEGIN { plan tests => 12 }
+# we run each test TWICE to make sure _anoncopy is working
+BEGIN { plan tests => 24 }
 
 use SQL::Abstract;
 
@@ -151,18 +152,23 @@ my @handle_tests = (
 );
 
 for (@handle_tests) {
-      local $" = ', ';
-      #print "creating a handle with args ($_->{args}): ";
-      my $sql = SQL::Abstract->new;
-      my($stmt, @bind) = $sql->where($_->{where}, $_->{order});
-      my $bad = 0;
-      for(my $i=0; $i < @{$_->{bind}}; $i++) {
-         $bad++ unless $_->{bind}[$i] eq $bind[$i];
-      }
-      ok($stmt eq $_->{stmt} && @bind == @{$_->{bind}} && ! $bad) or 
-              print "got\n",
-                    "[$stmt] [@bind]\n",
-                    "instead of\n",
-                    "[$_->{stmt}] [@{$_->{bind}}]\n\n";
+    local $" = ', ';
+    #print "creating a handle with args ($_->{args}): ";
+    my $sql = SQL::Abstract->new;
+
+    # run twice
+    for (my $i=0; $i < 2; $i++) {
+        my($stmt, @bind) = $sql->where($_->{where}, $_->{order});
+        my $bad = 0;
+        for(my $i=0; $i < @{$_->{bind}}; $i++) {
+            $bad++ unless $_->{bind}[$i] eq $bind[$i];
+        }
+
+        ok($stmt eq $_->{stmt} && @bind == @{$_->{bind}} && ! $bad) or 
+                print "got\n",
+                      "[$stmt] [@bind]\n",
+                      "instead of\n",
+                      "[$_->{stmt}] [@{$_->{bind}}]\n\n";
+    }
 }
 
