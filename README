@@ -130,7 +130,7 @@ FUNCTIONS
     order to each function (table, then fields, then a where clause) to try
     and simplify things.
 
-  new(case => 'lower', cmp => 'like', logic => 'and', convert => 'upper')
+  new(option => 'value')
     The "new()" function takes a list of options and values, and returns a
     new SQL::Abstract object which can then be used to generate SQL through
     the methods below. The options accepted are:
@@ -195,8 +195,8 @@ FUNCTIONS
             WHERE upper(keywords) like upper('MaKe iT CAse inSeNSItive')
 
         The conversion can be "upper()", "lower()", or any other SQL
-        function that can be applied symmetrically to fields, actually
-        (SQL::Abstract does not validate this option; it will just pass
+        function that can be applied symmetrically to fields (actually
+        SQL::Abstract does not validate this option; it will just pass
         through what you specify verbatim).
 
     bindtype
@@ -249,6 +249,24 @@ FUNCTIONS
         "for" loop in a simple sub called "bind_fields()" or something and
         reuse it repeatedly. You still get a layer of abstraction over
         manual SQL specification.
+
+    quote_char
+        This is the character that a table or column name will be quoted
+        with. By default this is an empty string, but you could set it to
+        the character "`", to generate SQL like this:
+
+          SELECT `a_field` FROM `a_table` WHERE `some_field` LIKE '%someval%'
+
+        This is useful if you have tables or columns that are reserved words
+        in your database's SQL dialect.
+
+    name_sep
+        This is the character that separates a table and column name. It is
+        necessary to specify this when the "quote_char" option is selected,
+        so that tables and column names can be individually quoted like
+        this:
+
+          SELECT `table`.`one_field` FROM `table` WHERE `table`.`other_field` = 1
 
   insert($table, \@values || \%fieldvals)
     This is the simplest function. You simply give it a table name and
@@ -636,6 +654,7 @@ ACKNOWLEDGEMENTS
         Philip Collins (per-field SQL functions)
         Eric Kolve (hashref "AND" support)
         Mike Fragassi (enhancements to "BETWEEN" and "LIKE")
+        Dan Kubb (support for "quote_char" and "name_sep")
 
     Thanks!
 
@@ -649,7 +668,7 @@ SEE ALSO
     DBIx::Abstract, DBI, CGI::FormBuilder, HTML::QuickTable
 
 VERSION
-    $Id: Abstract.pm,v 1.19 2005/04/29 18:20:30 nwiger Exp $
+    $Id: Abstract.pm,v 1.20 2005/08/18 18:41:58 nwiger Exp $
 
 AUTHOR
     Copyright (c) 2001-2005 Nathan Wiger <nate@sun.com>. All Rights
