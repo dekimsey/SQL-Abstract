@@ -143,9 +143,9 @@ clause) to try and simplify things.
 
 use Carp;
 use strict;
-use vars qw($VERSION $AUTOLOAD);
 
-$VERSION = do { my @r=(q$Revision: 1.20 $=~/\d+/g); sprintf "%d."."%02d"x$#r,@r };
+our $VERSION = do { my @r=(q$Revision: 1.21 $=~/\d+/g); sprintf "%d."."%02d"x$#r,@r };
+our $AUTOLOAD;
 
 # Fix SQL case, if so requested
 sub _sqlcase {
@@ -647,7 +647,7 @@ sub _recurse_where {
         for my $k (sort keys %$where) {
             my $v = $where->{$k};
             my $label = $self->_quote($k);
-            if ($k =~ /^-(.*)/) {
+            if ($k =~ /^-(\D+)/) {
                 # special nesting, like -and, -or, -nest, so shift over
                 my $subjoin = $self->_modlogic($1);
                 $self->_debug("OP(-$1) means special logic ($subjoin), recursing...");
@@ -666,7 +666,7 @@ sub _recurse_where {
 
                 # special nesting, like -and, -or, -nest, so shift over
                 my $subjoin = $self->_sqlcase('or');
-                if ($v[0] =~ /^-(.*)/) {
+                if ($v[0] =~ /^-(\D+)/) {
                     $subjoin = $self->_modlogic($1);    # override subjoin
                     $self->_debug("OP(-$1) means special logic ($subjoin), shifting...");
                     shift @v;
@@ -1244,7 +1244,7 @@ L<DBIx::Abstract>, L<DBI|DBI>, L<CGI::FormBuilder>, L<HTML::QuickTable>
 
 =head1 VERSION
 
-$Id: Abstract.pm,v 1.20 2005/08/18 18:41:58 nwiger Exp $
+$Id: Abstract.pm,v 1.21 2006/03/08 01:27:56 nwiger Exp $
 
 =head1 AUTHOR
 
