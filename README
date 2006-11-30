@@ -19,7 +19,7 @@ SYNOPSIS
         $sth->execute(@bind);
 
         # Just generate the WHERE clause
-        my($stmt, @bind)  = $sql->where(\%where, \@order);
+        my($stmt, @bind) = $sql->where(\%where, \@order);
 
         # Return values in the same order, for hashed queries
         # See PERFORMANCE section for more details
@@ -655,24 +655,26 @@ ACKNOWLEDGEMENTS
         Eric Kolve (hashref "AND" support)
         Mike Fragassi (enhancements to "BETWEEN" and "LIKE")
         Dan Kubb (support for "quote_char" and "name_sep")
+        Matt Trout (DBIx::Class support)
 
     Thanks!
 
 BUGS
     If found, please DO NOT submit anything via "rt.cpan.org" - that just
     causes me a ton of work. Email me a patch (or script demonstrating the
-    problem) to the below address, and include the VERSION string you'll be
-    seeing shortly.
+    problem) to the below address, and include the VERSION you're using.
 
 SEE ALSO
     DBIx::Abstract, DBI, CGI::FormBuilder, HTML::QuickTable
 
-VERSION
-    $Id: Abstract.pm,v 1.21 2006/03/08 01:27:56 nwiger Exp $
-
 AUTHOR
-    Copyright (c) 2001-2005 Nathan Wiger <nate@sun.com>. All Rights
+    Copyright (c) 2001-2006 Nathan Wiger <nwiger@cpan.org>. All Rights
     Reserved.
+
+    For support, your best bet is to try the "DBIx::Class" users mailing
+    list. While not an official support venue, "DBIx::Class" makes heavy use
+    of "SQL::Abstract", and as such list members there are very familiar
+    with how to create queries.
 
     This module is free software; you may copy this under the terms of the
     GNU General Public License, or the Artistic License, copies of which

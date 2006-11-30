@@ -1,7 +1,11 @@
-lib/SQL/Abstract.pm
+Changes
+INSTALL
+MANIFEST
 Makefile.PL
 README
-Changes
+lib/SQL/Abstract.pm
+pod/Changes.pod
+pod/INSTALL.pod
 t/00new.t
 t/01generate.t
 t/02where.t
