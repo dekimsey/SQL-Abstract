@@ -7,7 +7,7 @@ use Test;
 
 # use a BEGIN block so we print our plan before SQL::Abstract is loaded
 # we run each test TWICE to make sure _anoncopy is working
-BEGIN { plan tests => 24 }
+BEGIN { plan tests => 26 }
 
 use SQL::Abstract;
 
@@ -147,6 +147,15 @@ my @handle_tests = (
                  },
         stmt => " WHERE ( ( ( foo NOT LIKE ? ) OR ( foo NOT LIKE ? ) OR ( foo NOT LIKE ? ) ) AND ( ( fum LIKE ? ) OR ( fum LIKE ? ) ) AND nix BETWEEN ? AND ? AND nox NOT BETWEEN ? AND ? AND wix IN ( ?, ? ) AND wux NOT IN ( ?, ? ) )",
         bind => [7,8,9,'a','b',100,200,150,160,'zz','yy','30','40'],
+    },
+
+    {
+        where => {  
+          priority  => { '<', 2 },
+          is_ready  => \"",
+        },
+        stmt => " WHERE ( is_ready  AND priority < ? )",
+        bind => [2],
     },
 
 );

@@ -1,0 +1,38 @@
+
+Changes in SQL::Abstract 1.23
+
+1) Large patch by Laurent Dami to add all of the
+following functionality:
+
+ - support for nested subqueries (see the doc for explanations)
+ - +/- prefixes in C<@order> columns, meaning 'ASC' or 'DESC'
+ - documentation :
+    - added an explanation about flexibility of argument types
+      (passing scalars instead of hashrefs/arrayrefs)
+    - added an example of a boolean column (through ref to empty
+      string)
+    - mentioned that select() can take an arrayref of tables
+    - added explanation of +/- prefixes in C<@order>
+    - WHERE section structured into subsections
+    - new subsection for nested queries
+    - suppressed the NOTES section about Morgan laws, because
+      subqueries provide support for compound logic statements.
+
+These changes enable additional functionality in DBIx::DataModel
+as well.
+
+2) Patch by Robbie Bow to enable "quote_char" to take
+an array ref.  This fixes an issue to MS SQL Server,
+since it requires that columns and tables be quoted with
+surrounding [square brackets]
+
+3) Patch by Norbert BUCHMULLER to enable the use of
+the old-school-SQL operator for not-equal ('<>')
+could be used for the 'IS NOT NULL' expression:
+
+  foo => { '<>' => undef }
+
+This now properly generates:
+
+  foo IS NOT NULL
+

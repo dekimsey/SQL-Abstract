@@ -1,0 +1,13 @@
+--- #YAML:1.0
+name:                SQL-Abstract
+version:             1.23
+abstract:            Generate SQL from Perl data structures
+license:             ~
+generated_by:        ExtUtils::MakeMaker version 6.3201
+distribution_type:   module
+requires:     
+meta-spec:
+    url:     http://module-build.sourceforge.net/META-spec-v1.2.html
+    version: 1.2
+author:
+    - Nathan Wiger (nate@wiger.org)

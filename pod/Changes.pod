@@ -11,6 +11,12 @@ total revisions: 20;	selected revisions: 20
 description:
 SQL::Abstract - Generate SQL from Perl data structures
 ----------------------------
+revision 1.23
+date: 2008/08/07 18:41:58;  author: nwiger;  state: Exp;  lines: +62 -20
+- added patch from Laurent Dami that added +/- support and subquery fixes
+- added patch from Robbie Bow for "quote_char" to fix MQ SQL Server
+- added patch from Norbert Buchmuller to enable the use of "<>" to mean IS NOT NULL
+----------------------------
 revision 1.20
 date: 2005/08/18 18:41:58;  author: nwiger;  state: Exp;  lines: +104 -50
 - added patch from Dan Kubb enabling quote_char and name_sep options

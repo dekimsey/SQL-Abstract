@@ -30,9 +30,9 @@ my @tests = (
       #3
       {
               func   => 'select',
-              args   => ['test', '*', { a => 0 }, [qw/boom bada bing/]],
-              stmt   => 'SELECT * FROM test WHERE ( a = ? ) ORDER BY boom, bada, bing',
-              stmt_q => 'SELECT * FROM `test` WHERE ( `a` = ? ) ORDER BY `boom`, `bada`, `bing`',
+              args   => ['test', '*', { a => 0 }, [qw/boom +bada -bing/]],
+              stmt   => 'SELECT * FROM test WHERE ( a = ? ) ORDER BY boom, bada ASC, bing DESC',
+              stmt_q => 'SELECT * FROM `test` WHERE ( `a` = ? ) ORDER BY `boom`, `bada` ASC, `bing` DESC',
               bind   => [0]
       },             
       #4             
