@@ -137,16 +137,14 @@ Easy, eh?
 The functions are simple. There's one for each major SQL operation,
 and a constructor you use first. The arguments are specified in a
 similar order to each function (table, then fields, then a where 
-clause) to try and simplify things. Argument types are quite flexible,
-so whenever a hashref or arrayref is expected, you can always supply
-a plain scalar instead.
+clause) to try and simplify things.
 
 =cut
 
 use Carp;
 use strict;
 
-our $VERSION  = '1.23';
+our $VERSION  = '1.24';
 our $REVISION = '$Id: Abstract.pm 12 2006-11-30 17:05:24Z nwiger $';
 our $AUTOLOAD;
 
@@ -201,11 +199,11 @@ sub _quote {
     return $label
       if $label eq '*';
 
-    return $self->{quote_char_left} . $label . $self->{quote_char_right}
+    return $self->{quote_char} . $label . $self->{quote_char}
       if !defined $self->{name_sep};
 
     return join $self->{name_sep},
-        map { $self->{quote_char_left} . $_ . $self->{quote_char_right}  }
+        map { $self->{quote_char} . $_ . $self->{quote_char}  }
         split /\Q$self->{name_sep}\E/, $label;
 }
 
@@ -360,18 +358,11 @@ get a layer of abstraction over manual SQL specification.
 
 =item quote_char
 
-This is the character or characters that a table or column name will be 
-quoted with. By default this is an empty string, but you could set it to 
+This is the character that a table or column name will be quoted
+with.  By default this is an empty string, but you could set it to 
 the character C<`>, to generate SQL like this:
 
   SELECT `a_field` FROM `a_table` WHERE `some_field` LIKE '%someval%'
-
-Alternatively, you can supply an array ref of two items, the first being the left
-hand quote character, and the second the right hand quote character. For
-example, you could supply C<['[',']']> for SQL Server 2000 compliant quotes
-that generates SQL like this:
-
-  SELECT [a_field] FROM [a_table] WHERE [some_field] LIKE '%someval%'
 
 This is useful if you have tables or columns that are reserved words
 in your database's SQL dialect.
@@ -405,16 +396,8 @@ sub new {
     # default comparison is "=", but can be overridden
     $opt{cmp} ||= '=';
 
-    # default quotation character(s) around tables/columns
+    # default quotation character around tables/columns
     $opt{quote_char} ||= '';
-
-    if (ref($opt{quote_char}) eq 'ARRAY') {
-        $opt{quote_char_left}  = $opt{quote_char}[0];
-        $opt{quote_char_right} = $opt{quote_char}[1];
-    }
-    else {
-        $opt{quote_char_left} = $opt{quote_char_right} = $opt{quote_char};
-    }
 
     return bless \%opt, $class;
 }
@@ -538,18 +521,9 @@ sub update {
 
 =head2 select($table, \@fields, \%where, \@order)
 
-This takes a table (or arrayref of tables), arrayref of fields (or '*'), 
-optional hashref WHERE clause, and optional arrayref order by, and returns the
+This takes a table, arrayref of fields (or '*'), optional hashref
+WHERE clause, and optional arrayref order by, and returns the
 corresponding SQL SELECT statement and list of bind values.
-
-Columns in C<@order> may be prefixed by a '+' or '-' sign, meaning 
-"ascending" or "descending". Hence
-
-  select("customers", "*", {}, [qw/-balance +name/])
-
-means
-
-  SELECT * FROM customers ORDER BY balance DESC, name ASC
 
 =cut
 
@@ -687,31 +661,24 @@ sub _recurse_where {
                 push @sqlf, $label . $self->_sqlcase(' is null');
             } elsif (ref $v eq 'ARRAY') {
                 my @v = @$v;
+                
+                # multiple elements: multiple options
+                $self->_debug("ARRAY($k) means multiple elements: [ @v ]");
 
-                if (($k =~ tr/?//) == @v) { # if nb of '?' equals size of @v
-                    # nested query
-                    $self->_debug("ARRAY($k) means subquery bind values: [ @v ]");
-                    push @sqlf, $k;
-                    push @sqlv, @v;
-                } else {
-                    # multiple elements: multiple options
-                    $self->_debug("ARRAY($k) means multiple elements: [ @v ]");
-
-                    # special nesting, like -and, -or, -nest, so shift over
-                    my $subjoin = $self->_sqlcase('or');
-                    if ($v[0] =~ /^-(\D+)/) {
-                        $subjoin = $self->_modlogic($1);    # override subjoin
-                        $self->_debug("OP(-$1) means special logic ($subjoin), shifting...");
-                        shift @v;
-                    }
-
-                    # map into an array of hashrefs and recurse
-                    my @ret = $self->_recurse_where([map { {$k => $_} } @v], $subjoin);
-
-                    # push results into our structure
-                    push @sqlf, shift @ret;
-                    push @sqlv, @ret;
+                # special nesting, like -and, -or, -nest, so shift over
+                my $subjoin = $self->_sqlcase('or');
+                if ($v[0] =~ /^-(\D+)/) {
+                    $subjoin = $self->_modlogic($1);    # override subjoin
+                    $self->_debug("OP(-$1) means special logic ($subjoin), shifting...");
+                    shift @v;
                 }
+
+                # map into an array of hashrefs and recurse
+                my @ret = $self->_recurse_where([map { {$k => $_} } @v], $subjoin);
+
+                # push results into our structure
+                push @sqlf, shift @ret;
+                push @sqlv, @ret;
             } elsif (ref $v eq 'HASH') {
                 # modified operator { '!=', 'completed' }
                 for my $f (sort keys %$v) {
@@ -733,25 +700,20 @@ sub _recurse_where {
                                               ')';
                               }
                               push @sqlv, $self->_bindtype($k, @$x);
-                          } elsif (($f =~ tr/?//) == @$x) { # if nb of '?' equals size of @$x
-                              # nested query
-                              $self->_debug("ARRAY($x) means subquery bind values: [ @$x ]");
-                              push @sqlf, "$label $f";
-                              push @sqlv, @$x;
                           } else {
                               # multiple elements: multiple options
                               $self->_debug("ARRAY($x) means multiple elements: [ @$x ]");
-
+                              
                               # map into an array of hashrefs and recurse
                               my @ret = $self->_recurse_where([map { {$k => {$f, $_}} } @$x]);
-
+                              
                               # push results into our structure
                               push @sqlf, shift @ret;
                               push @sqlv, @ret;
                           }
                     } elsif (! defined($x)) {
                         # undef = NOT null
-                        my $not = ($f eq '!=' || $f eq '<>' || $f eq 'not like') ? ' not' : '';
+                        my $not = ($f eq '!=' || $f eq 'not like') ? ' not' : '';
                         push @sqlf, $label . $self->_sqlcase(" is$not null");
                     } else {
                         # regular ol' value
@@ -798,16 +760,7 @@ sub _order_by {
                $ref eq ''       ? $_[0]    :
                puke "Unsupported data struct $ref for ORDER BY";
 
-    # quote columns; '+' or '-' prefix means ascending or descending
-    # also handle the column quoting so "column ASC" becomes `column` ASC
-    my %direction = ('+' => 'ASC', '-' => 'DESC');
-    foreach (@vals) {
-      s/^([-+])\s*(\S+)/$2 $direction{$1}/;
-      s/(\s(?i:ASC|DESC))\s*$//;
-      $_ = $self->_quote($_) . ($1 || '');
-    }
-
-    my $val = join ', ', @vals;
+    my $val = join ', ', map { $self->_quote($_) } @vals;
     return $val ? $self->_sqlcase(' order by')." $val" : '';
 }
 
@@ -944,8 +897,6 @@ __END__
 
 =head1 WHERE CLAUSES
 
-=head2 Introduction
-
 This module uses a variation on the idea from L<DBIx::Abstract>. It
 is B<NOT>, repeat I<not> 100% compatible. B<The main logic of this
 module is that things in arrays are OR'ed, and things in hashes
@@ -958,8 +909,6 @@ each C<%where> hash shown, it is assumed you used:
 
 However, note that the C<%where> hash can be used directly in any
 of the other functions as well, as described above.
-
-=head2 Key-value pairs
 
 So, let's get started. To begin, a simple hash:
 
@@ -983,12 +932,9 @@ an arrayref:
     );
 
 This simple code will create the following:
-
+    
     $stmt = "WHERE user = ? AND ( status = ? OR status = ? OR status = ? )";
     @bind = ('nwiger', 'assigned', 'in-progress', 'pending');
-
-
-=head2 Comparison operators
 
 If you want to specify a different type of operator for your comparison,
 you can use a hashref for a given column:
@@ -1041,11 +987,7 @@ Which would generate:
     $stmt = "WHERE user = ? AND priority = ? OR priority != ?";
     @bind = ('nwiger', '2', '1');
 
-
-=head2 Logic and nesting operators
-
-In the example above,
-there is a subtle trap if you want to say something like
+However, there is a subtle trap if you want to say something like
 this (notice the C<AND>):
 
     WHERE priority != ? AND priority != ?
@@ -1093,8 +1035,6 @@ You would do:
         -nest => [ workhrs => {'>', 20}, geo => 'ASIA' ],
     );
 
-=head2 Special operators : IN, BETWEEN, etc.
-
 You can also use the hashref format to compare a list of fields using the
 C<IN> comparison operator, by specifying the list as an arrayref:
 
@@ -1121,9 +1061,6 @@ as C<BETWEEN>, C<SOME>, and so forth. For example:
 Would give you:
 
     WHERE user = ? AND completion_date NOT BETWEEN ( ? AND ? )
-
-
-=head2 Nested conditions
 
 So far, we've seen how multiple conditions are joined with a top-level
 C<AND>.  We can change this by putting the different conditions we want in
@@ -1165,9 +1102,6 @@ That would yield:
           ( ( workhrs > ? AND geo = ? )
          OR ( workhrs < ? AND geo = ? ) ) )
 
-
-=head2 Literal SQL
-
 Finally, sometimes only literal SQL will do. If you want to include
 literal SQL verbatim, you can specify it as a scalar reference, namely:
 
@@ -1194,115 +1128,6 @@ with this:
     );
 
 TMTOWTDI.
-
-Conditions on boolean columns can be expressed in the 
-same way, passing a reference to an empty string :
-
-    my %where = (
-        priority  => { '<', 2 },
-        is_ready  => \"";
-    );
-
-which yields
-
-    $stmt = "WHERE priority < ? AND is_ready";
-    @bind = ('2');
-
-
-=head2 Nested queries
-
-A key-value pair in a hash is interpreted as a subquery whenever
-the key contains I<n> question marks (I<n> E<gt> 0), and the
-value is an arrayref of length I<n>. In that case, the
-statement is just inserted as is in the final statement, 
-and the bind values are pushed unto the final bind values.
-This is useful for nesting parenthesized clauses in the
-main SQL query. 
-
-Here is a first example :
-
-  my ($sub_stmt, @sub_bind) = ("SELECT c1 FROM t1 WHERE c2 < ? AND c3 LIKE ?",
-                               100, "foo%");
-  my %where = (
-    foo => 1234,
-    bar => {"IN ($sub_stmt)" => \@sub_bind},
-  );
-
-This yields :
-
-  $stmt = "WHERE (foo = ? AND bar IN (SELECT c1 FROM t1 
-                                             WHERE c2 < ? AND c3 LIKE ?))";
-  @bind = (1234, 100, "foo%");
-
-Other subquery operators, like for example C<"E<gt> ALL"> or C<"NOT IN">, 
-are expressed in the same way. Of course the C<$sub_stmt> and
-its associated bind values can be generated through a former call 
-to C<select()> :
-
-  my ($sub_stmt, @sub_bind)
-     = $sql->select("t1", "c1", {c2 => {"<" => 100}, 
-                                 c3 => {-like => "foo%"}});
-  my %where = (
-    foo => 1234,
-    bar => {"> ALL ($sub_stmt)" => \@sub_bind},
-  );
-
-In the examples above, the subquery was used as an operator on a column;
-but the same principle also applies for an EXISTS subquery within
-the main C<%where> hash :
-
-  my ($sub_stmt, @sub_bind) 
-     = $sql->select("t1", "*", {c1 => 1, c2 => \"> t0.c0"});
-  my %where = (
-    foo                  => 1234,
-    "EXISTS ($sub_stmt)" => \@sub_bind,
-  );
-
-which yields
-
-  $stmt = "WHERE (foo = ? AND EXISTS (SELECT * FROM t1 
-                                        WHERE c1 = ? AND c2 > t0.c0))";
-  @bind = (1234, 1);
-
-
-Observe that the condition on C<c2> in the subquery refers to 
-column C<t0.c0> of the main query : this is I<not> a bind 
-value, so we have to express it through a scalar ref. 
-Writing C<< c2 => {">" => "t0.c0"} >> would have generated
-C<< c2 > ? >> with bind value C<"t0.c0"> ... not exactly
-what we wanted here.
-
-Another use of the subquery technique is when some SQL clauses need
-parentheses, as it often occurs with some proprietary SQL extensions
-like for example fulltext expressions, geospatial expressions, 
-NATIVE clauses, etc. Here is an example of a fulltext query in MySQL :
-
-  my %where = (
-    "MATCH (col1, col2) AGAINST (?)" => ["apples"]
-  );
-
-Observe that the value C<"apples"> is not a plain scalar : 
-it needs to be within an arrayref of size 1, in order to match the single 
-question mark on the left-hand side.
-
-Finally, here is an example where a subquery is used
-for expressing unary negation:
-
-  my ($sub_stmt, @sub_bind) 
-     = $sql->where({age => [{"<" => 10}, {">" => 20}]});
-  $sub_stmt =~ s/^ where //i; # don't want "WHERE" in the subclause
-  my %where = (
-        lname             => {like => '%son%'},
-        "NOT ($sub_stmt)" => \@sub_bind,
-    );
-
-This yields
-
-  $stmt = "lname LIKE ? AND NOT ( age < ? OR age > ? )"
-  @bind = ('%son%', 10, 20)
-
-
-=head2 Conclusion
 
 These pages could go on for a while, since the nesting of the data
 structures this module can handle are pretty much unlimited (the
@@ -1371,8 +1196,28 @@ a fast interface to returning and formatting data. I frequently
 use these three modules together to write complex database query
 apps in under 50 lines.
 
+=head1 NOTES
 
-=head1 CONTRIBUTORS
+There is not (yet) any explicit support for SQL compound logic
+statements like "AND NOT". Instead, just do the de Morgan's
+law transformations yourself. For example, this:
+
+  "lname LIKE '%son%' AND NOT ( age < 10 OR age > 20 )"
+
+Becomes:
+
+  "lname LIKE '%son%' AND ( age >= 10 AND age <= 20 )"
+
+With the corresponding C<%where> hash:
+
+    %where = (
+        lname => {like => '%son%'},
+        age   => [-and => {'>=', 10}, {'<=', 20}],
+    );
+
+Again, remember that the C<-and> goes I<inside> the arrayref.
+
+=head1 ACKNOWLEDGEMENTS
 
 There are a number of individuals that have really helped out with
 this module. Unfortunately, most of them submitted bugs via CPAN
@@ -1385,16 +1230,15 @@ so I have no idea who they are! But the people I do know are:
     Mike Fragassi (enhancements to "BETWEEN" and "LIKE")
     Dan Kubb (support for "quote_char" and "name_sep")
     Matt Trout (DBIx::Class support)
-    Laurent Dami (large patch for +/- support and subqueries)
-    Robbie Bow (patch to for "quote_char" to fix MQ SQL Server)
 
 Thanks!
 
 =head1 BUGS
 
-If found, please DO NOT submit anything via C<rt.cpan.org> - that
-just causes me a ton of work. Email me a patch (or script demonstrating
-the problem) to the below address, and include the VERSION you're using.
+Bugs can be filed through the RT site:
+https://rt.cpan.org/Dist/Display.html?Queue=SQL-Abstract
+
+Or email: bugs-SQL-Abstract@rt.cpan.org
 
 =head1 SEE ALSO
 
@@ -1404,10 +1248,13 @@ L<DBIx::Abstract>, L<DBI|DBI>, L<CGI::FormBuilder>, L<HTML::QuickTable>
 
 Copyright (c) 2001-2006 Nathan Wiger <nwiger@cpan.org>. All Rights Reserved.
 
-For support, your best bet is to try the C<DBIx::Class> users mailing list.
-While not an official support venue, C<DBIx::Class> makes heavy use of
-C<SQL::Abstract>, and as such list members there are very familiar with
-how to create queries.
+=head1 MAINTAINERS
+
+The DBIx-Class team, contactable via the DBIC list at <dbix-class@lists.scsys.co.uk>
+
+Release manager Matt S Trout, mst <at> shadowcat.co.uk
+
+=head1 LICENSE 
 
 This module is free software; you may copy this under the terms of
 the GNU General Public License, or the Artistic License, copies of

@@ -1,9 +1,9 @@
 --- #YAML:1.0
 name:                SQL-Abstract
-version:             1.23
+version:             1.24
 abstract:            Generate SQL from Perl data structures
 license:             ~
-generated_by:        ExtUtils::MakeMaker version 6.3201
+generated_by:        ExtUtils::MakeMaker version 6.36
 distribution_type:   module
 requires:     
 meta-spec:

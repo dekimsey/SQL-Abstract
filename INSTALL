@@ -21,6 +21,13 @@ AUTHOR
     Copyright (c) 2000-2006 Nate Wiger <nwiger@cpan.org>. All Rights
     Reserved.
 
+MAINTAINERS
+
+    The DBIx-Class team, contactable via the DBIC list at <dbix-class@lists.scsys.co.uk>
+    Release manager Matt S Trout, mst <at> shadowcat.co.uk
+
+LICENSE
+
     This module is free software; you may copy this under the terms of the
     GNU General Public License, or the Artistic License, copies of which
     should have accompanied your Perl kit.

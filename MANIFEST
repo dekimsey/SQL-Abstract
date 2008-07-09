@@ -1,14 +1,13 @@
 Changes
 INSTALL
-MANIFEST
-Makefile.PL
-README
 lib/SQL/Abstract.pm
+Makefile.PL
+MANIFEST			This list of files
 pod/Changes.pod
 pod/INSTALL.pod
+README
 t/00new.t
 t/01generate.t
 t/02where.t
 t/03values.t
-t/04subqueries.t
 META.yml                                 Module meta-data (added by MakeMaker)
