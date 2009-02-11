@@ -1,18 +1,17 @@
-#!/usr/bin/perl -I. -w
+#!/usr/bin/perl
 
 use strict;
-use vars qw($TESTING);
-$TESTING = 1;
-use Test;
-
-# use a BEGIN block so we print our plan before SQL::Abstract is loaded
-# we run each test TWICE to make sure _anoncopy is working
-BEGIN { plan tests => 24 }
+use warnings;
+use Test::More;
+use Test::Exception;
+use SQL::Abstract::Test import => ['is_same_sql_bind'];
 
 use SQL::Abstract;
 
 # Make sure to test the examples, since having them break is somewhat
 # embarrassing. :-(
+
+my $not_stringifiable = bless {}, 'SQLA::NotStringifiable';
 
 my @handle_tests = (
     {
@@ -73,7 +72,9 @@ my @handle_tests = (
             completion_date => { 'between', ['2002-10-01', '2003-02-06'] },
         },
         order => \'ticket, requestor',
-        stmt => " WHERE ( completion_date BETWEEN ? AND ? AND status = ? ) ORDER BY ticket, requestor",
+#LDNOTE: modified parentheses
+#        stmt => " WHERE ( completion_date BETWEEN ? AND ? AND status = ? ) ORDER BY ticket, requestor",
+        stmt => " WHERE ( ( completion_date BETWEEN ? AND ? ) AND status = ? ) ORDER BY ticket, requestor",
         bind => [qw/2002-10-01 2003-02-06 completed/],
     },
 
@@ -120,7 +121,9 @@ my @handle_tests = (
             requestor => { 'like', undef }, 
         },
         order => \'requestor, ticket',
-        stmt => " WHERE ( priority BETWEEN ? AND ? AND requestor IS NULL ) ORDER BY requestor, ticket",
+#LDNOTE: modified parentheses
+#        stmt => " WHERE ( priority BETWEEN ? AND ? AND requestor IS NULL ) ORDER BY requestor, ticket",
+        stmt => " WHERE ( ( priority BETWEEN ? AND ? ) AND requestor IS NULL ) ORDER BY requestor, ticket",
         bind => [qw/1 3/],
     },
 
@@ -133,7 +136,9 @@ my @handle_tests = (
 	     '>'  => 10,
 	    },
         },
-        stmt => " WHERE ( id = ? AND num <= ? AND num > ? )",
+# LDNOTE : modified test below, just parentheses differ
+#        stmt => " WHERE ( id = ? AND num <= ? AND num > ? )",
+        stmt => " WHERE ( id = ? AND ( num <= ? AND num > ? ) )",
         bind => [qw/1 20 10/],
     },
 
@@ -145,30 +150,56 @@ my @handle_tests = (
                    wix => {'in' => [qw/zz yy/]},
                    wux => {'not_in'  => [qw/30 40/]}
                  },
-        stmt => " WHERE ( ( ( foo NOT LIKE ? ) OR ( foo NOT LIKE ? ) OR ( foo NOT LIKE ? ) ) AND ( ( fum LIKE ? ) OR ( fum LIKE ? ) ) AND nix BETWEEN ? AND ? AND nox NOT BETWEEN ? AND ? AND wix IN ( ?, ? ) AND wux NOT IN ( ?, ? ) )",
+# LDNOTE: modified parentheses for BETWEEN (trivial).
+# Also modified the logic of "not_like" (severe, same reasons as #14 in 00where.t)
+#        stmt => " WHERE ( ( ( foo NOT LIKE ? ) OR ( foo NOT LIKE ? ) OR ( foo NOT LIKE ? ) ) AND ( ( fum LIKE ? ) OR ( fum LIKE ? ) ) AND nix BETWEEN ? AND ? AND nox NOT BETWEEN ? AND ? AND wix IN ( ?, ? ) AND wux NOT IN ( ?, ? ) )",
+        stmt => " WHERE ( ( foo NOT LIKE ? AND foo NOT LIKE ? AND foo NOT LIKE ? ) AND ( ( fum LIKE ? ) OR ( fum LIKE ? ) ) AND ( nix BETWEEN ? AND ? ) AND ( nox NOT BETWEEN ? AND ? ) AND wix IN ( ?, ? ) AND wux NOT IN ( ?, ? ) )",
         bind => [7,8,9,'a','b',100,200,150,160,'zz','yy','30','40'],
     },
 
+    {
+        where => {
+            id  => [],
+            bar => {'!=' => []},
+        },
+        stmt => " WHERE ( 1=1 AND 0=1 )",
+        bind => [],
+    },
+
+
+    {
+        where => {
+            foo => \["IN (?, ?)", 22, 33],
+            bar => [-and =>  \["> ?", 44], \["< ?", 55] ],
+        },
+        stmt => " WHERE ( (bar > ? AND bar < ?) AND foo IN (?, ?) )",
+        bind => [44, 55, 22, 33],
+    },
+
+   {
+       where => { -and => [{}, { 'me.id' => '1'}] },
+       stmt => " WHERE ( ( me.id = ? ) )",
+       bind => [ 1 ],
+   },
+
+   {
+       where => { foo => $not_stringifiable, },
+       stmt => " WHERE ( foo = ? )",
+       bind => [ $not_stringifiable ],
+   },
+
 );
 
-for (@handle_tests) {
-    local $" = ', ';
-    #print "creating a handle with args ($_->{args}): ";
+
+plan tests => scalar(@handle_tests) + 1;
+
+for my $case (@handle_tests) {
     my $sql = SQL::Abstract->new;
-
-    # run twice
-    for (my $i=0; $i < 2; $i++) {
-        my($stmt, @bind) = $sql->where($_->{where}, $_->{order});
-        my $bad = 0;
-        for(my $i=0; $i < @{$_->{bind}}; $i++) {
-            $bad++ unless $_->{bind}[$i] eq $bind[$i];
-        }
-
-        ok($stmt eq $_->{stmt} && @bind == @{$_->{bind}} && ! $bad) or 
-                print "got\n",
-                      "[$stmt] [@bind]\n",
-                      "instead of\n",
-                      "[$_->{stmt}] [@{$_->{bind}}]\n\n";
-    }
+    my($stmt, @bind) = $sql->where($case->{where}, $case->{order});
+    is_same_sql_bind($stmt, \@bind, $case->{stmt}, $case->{bind})
 }
 
+dies_ok {
+    my $sql = SQL::Abstract->new;
+    $sql->where({ foo => { '>=' => [] }},);
+};

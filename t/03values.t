@@ -1,12 +1,10 @@
-#!/usr/bin/perl -I. -w
+#!/usr/bin/perl
 
 use strict;
-use vars qw($TESTING);
-$TESTING = 1;
-use Test;
+use warnings;
+use Test::More;
 
-# use a BEGIN block so we print our plan before SQL::Abstract is loaded
-BEGIN { plan tests => 5 }
+use SQL::Abstract::Test import => ['is_same_sql_bind'];
 
 use SQL::Abstract;
 
@@ -58,6 +56,9 @@ my @data = (
         state => 'CO',
     },
 );
+
+
+plan tests => scalar(@data);
 
 # Note to self: I have no idea what this does anymore
 # It looks like a cool fucking segment of code though!
