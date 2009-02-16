@@ -370,6 +370,74 @@ my @tests = (
               bind   => [qw/1 2 3 4/, { answer => 42}],
               warning_like => qr/HASH ref as bind value in insert is not supported/i,
       },             
+      #40            
+      {              
+              func   => 'update',
+              args   => ['test', {a => 1, b => \["42"]}, {a => {'between', [1,2]}}],
+              stmt   => 'UPDATE test SET a = ?, b = 42 WHERE ( a BETWEEN ? AND ? )',
+              stmt_q => 'UPDATE `test` SET `a` = ?, `b` = 42 WHERE ( `a` BETWEEN ? AND ? )',
+              bind   => [qw(1 1 2)],
+      },             
+      #41
+      {
+              func   => 'insert',
+              args   => ['test', {a => 1, b => \["42"]}],
+              stmt   => 'INSERT INTO test (a, b) VALUES (?, 42)',
+              stmt_q => 'INSERT INTO `test` (`a`, `b`) VALUES (?, 42)',
+              bind   => [qw(1)],
+      },
+      #42
+      {
+              func   => 'select',
+              args   => ['test', '*', { a => \["= 42"], b => 1}],
+              stmt   => q{SELECT * FROM test WHERE ( a = 42 ) AND (b = ? )},
+              stmt_q => q{SELECT * FROM `test` WHERE ( `a` = 42 ) AND ( `b` = ? )},
+              bind   => [qw(1)],
+      },
+      #43
+      {
+              func   => 'select',
+              args   => ['test', '*', { a => {'<' => \["42"]}, b => 8 }],
+              stmt   => 'SELECT * FROM test WHERE ( a < 42 AND b = ? )',
+              stmt_q => 'SELECT * FROM `test` WHERE ( `a` < 42 AND `b` = ? )',
+              bind   => [qw(8)],
+      },             
+      #44
+      {
+              func   => 'insert',
+              new    => {bindtype => 'columns'},
+              args   => ['test', {a => 1, b => \["to_date(?, 'MM/DD/YY')", '02/02/02']}],
+              stmt   => 'INSERT INTO test (a, b) VALUES (?, to_date(?, \'MM/DD/YY\'))',
+              stmt_q => 'INSERT INTO `test` (`a`, `b`) VALUES (?, to_date(?, \'MM/DD/YY\'))',
+              bind   => [[a => '1'], [b => '02/02/02']],
+      },
+      #45
+      {              
+              func   => 'update',
+              new    => {bindtype => 'columns'},
+              args   => ['test', {a => 1, b => \["to_date(?, 'MM/DD/YY')", '02/02/02']}, {a => {'between', [1,2]}}],
+              stmt   => 'UPDATE test SET a = ?, b = to_date(?, \'MM/DD/YY\') WHERE ( a BETWEEN ? AND ? )',
+              stmt_q => 'UPDATE `test` SET `a` = ?, `b` = to_date(?, \'MM/DD/YY\') WHERE ( `a` BETWEEN ? AND ? )',
+              bind   => [[a => '1'], [b => '02/02/02'], [a => '1'], [a => '2']],
+      },             
+      #46
+      {
+              func   => 'select',
+              new    => {bindtype => 'columns'},
+              args   => ['test', '*', { a => \["= to_date(?, 'MM/DD/YY')", '02/02/02']}],
+              stmt   => q{SELECT * FROM test WHERE ( a = to_date(?, 'MM/DD/YY') )},
+              stmt_q => q{SELECT * FROM `test` WHERE ( `a` = to_date(?, 'MM/DD/YY') )},
+              bind   => [[a => '02/02/02']],
+      },
+      #47
+      {
+              func   => 'select',
+              new    => {bindtype => 'columns'},
+              args   => ['test', '*', { a => {'<' => \["to_date(?, 'MM/DD/YY')", '02/02/02']}, b => 8 }],
+              stmt   => 'SELECT * FROM test WHERE ( a < to_date(?, \'MM/DD/YY\') AND b = ? )',
+              stmt_q => 'SELECT * FROM `test` WHERE ( `a` < to_date(?, \'MM/DD/YY\') AND `b` = ? )',
+              bind   => [[a => '02/02/02'], [b => 8]],
+      },             
 );
 
 
