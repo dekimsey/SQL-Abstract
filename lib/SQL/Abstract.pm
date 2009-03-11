@@ -15,9 +15,10 @@ use Scalar::Util qw/blessed/;
 # GLOBALS
 #======================================================================
 
-our $VERSION  = '1.49_04';
-$VERSION      = eval $VERSION; # numify for warning-free dev releases
+our $VERSION  = '1.50';
 
+# This would confuse some packagers
+#$VERSION      = eval $VERSION; # numify for warning-free dev releases
 
 our $AUTOLOAD;
 
@@ -386,6 +387,8 @@ sub _where_ARRAYREF {
       # skip empty elements, otherwise get invalid trailing AND stuff
       ARRAYREF  => sub {$self->_recurse_where($el)        if @$el},
 
+      ARRAYREFREF => sub { @{${$el}}                 if @{${$el}}},
+
       HASHREF   => sub {$self->_recurse_where($el, 'and') if %$el},
            # LDNOTE : previous SQLA code for hashrefs was creating a dirty
            # side-effect: the first hashref within an array would change
@@ -410,7 +413,16 @@ sub _where_ARRAYREF {
   return $self->_join_sql_clauses($logic, \@sql_clauses, \@all_bind);
 }
 
+#======================================================================
+# WHERE: top-level ARRAYREFREF
+#======================================================================
 
+sub _where_ARRAYREFREF {
+    my ($self, $where) = @_;
+    my ($sql, @bind) = @{${$where}};
+
+    return ($sql, @bind);
+}
 
 #======================================================================
 # WHERE: top-level HASHREF
@@ -990,7 +1002,35 @@ sub values {
     my $data = shift || return;
     puke "Argument to ", __PACKAGE__, "->values must be a \\%hash"
         unless ref $data eq 'HASH';
-    return map { $self->_bindtype($_, $data->{$_}) } sort keys %$data;
+
+    my @all_bind;
+    foreach my $k ( sort keys %$data ) {
+        my $v = $data->{$k};
+        $self->_SWITCH_refkind($v, {
+          ARRAYREF => sub { 
+            if ($self->{array_datatypes}) { # array datatype
+              push @all_bind, $self->_bindtype($k, $v);
+            }
+            else {                          # literal SQL with bind
+              my ($sql, @bind) = @$v;
+              $self->_assert_bindval_matches_bindtype(@bind);
+              push @all_bind, @bind;
+            }
+          },
+          ARRAYREFREF => sub { # literal SQL with bind
+            my ($sql, @bind) = @${$v};
+            $self->_assert_bindval_matches_bindtype(@bind);
+            push @all_bind, @bind;
+          },
+          SCALARREF => sub {  # literal SQL without bind
+          },
+          SCALAR_or_UNDEF => sub {
+            push @all_bind, $self->_bindtype($k, $v);
+          },
+        });
+    }
+
+    return @all_bind;
 }
 
 sub generate {

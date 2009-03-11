@@ -74,7 +74,7 @@ sub is_same_sql_bind {
   my $same_bind = eq_bind($bind_ref1, $bind_ref2);
 
   # call Test::Builder::ok
-  $tb->ok($same_sql && $same_bind, $msg);
+  my $ret = $tb->ok($same_sql && $same_bind, $msg);
 
   # add debugging info
   if (!$same_sql) {
@@ -83,6 +83,9 @@ sub is_same_sql_bind {
   if (!$same_bind) {
     _bind_differ_diag($bind_ref1, $bind_ref2);
   }
+
+  # pass ok() result further
+  return $ret;
 }
 
 sub is_same_sql {
@@ -92,12 +95,15 @@ sub is_same_sql {
   my $same_sql  = eq_sql($sql1, $sql2);
 
   # call Test::Builder::ok
-  $tb->ok($same_sql, $msg);
+  my $ret = $tb->ok($same_sql, $msg);
 
   # add debugging info
   if (!$same_sql) {
     _sql_differ_diag($sql1, $sql2);
   }
+
+  # pass ok() result further
+  return $ret;
 }
 
 sub is_same_bind {
@@ -107,12 +113,15 @@ sub is_same_bind {
   my $same_bind = eq_bind($bind_ref1, $bind_ref2);
 
   # call Test::Builder::ok
-  $tb->ok($same_bind, $msg);
+  my $ret = $tb->ok($same_bind, $msg);
 
   # add debugging info
   if (!$same_bind) {
     _bind_differ_diag($bind_ref1, $bind_ref2);
   }
+
+  # pass ok() result further
+  return $ret;
 }
 
 sub _sql_differ_diag {
@@ -161,11 +170,19 @@ sub _eq_sql {
   my ($left, $right) = @_;
 
   # ignore top-level parentheses 
-  while ($left->[0]  eq 'PAREN') {$left  = $left->[1] }
-  while ($right->[0] eq 'PAREN') {$right = $right->[1]}
+  while ($left and $left->[0] and $left->[0]  eq 'PAREN') {$left  = $left->[1]}
+  while ($right and $right->[0] and $right->[0] eq 'PAREN') {$right = $right->[1]}
 
+  # one is defined the other not
+  if ( (defined $left) xor (defined $right) ) {
+    return 0;
+  }
+  # one is undefined, then so is the other
+  elsif (not defined $left) {
+    return 1;
+  }
   # if operators are different
-  if ($left->[0] ne $right->[0]) { 
+  elsif ($left->[0] ne $right->[0]) {
     $sql_differ = sprintf "OP [$left->[0]] != [$right->[0]] in\nleft: %s\nright: %s\n",
       unparse($left),
       unparse($right);

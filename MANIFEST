@@ -1,5 +1,6 @@
 Changes
 INSTALL
+lib/SQL/.Abstract.pm.swp
 lib/SQL/Abstract.pm
 lib/SQL/Abstract/Test.pm
 Makefile.PL
