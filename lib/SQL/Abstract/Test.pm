@@ -20,6 +20,7 @@ our $tb = __PACKAGE__->builder;
 use constant PARSE_TOP_LEVEL => 0;
 use constant PARSE_IN_EXPR => 1;
 use constant PARSE_IN_PARENS => 2;
+use constant PARSE_RHS => 3;
 
 # These SQL keywords always signal end of the current expression (except inside
 # of a parenthesized subexpression).
@@ -27,6 +28,7 @@ use constant PARSE_IN_PARENS => 2;
 # /.../x) regexes, without capturing parentheses. They will be automatically
 # anchored to word boundaries to match the whole token).
 my @expression_terminator_sql_keywords = (
+  'SELECT',
   'FROM',
   '(?:
     (?:
@@ -48,23 +50,32 @@ my @expression_terminator_sql_keywords = (
   'EXCEPT',
 );
 
-my $tokenizer_re_str = join('|',
-  map { '\b' . $_ . '\b' }
-    @expression_terminator_sql_keywords, 'AND', 'OR'
+# These are binary operator keywords always a single LHS and RHS
+# * AND/OR are handled separately as they are N-ary
+# * BETWEEN without paranthesis around the ANDed arguments (which
+#   makes it a non-binary op) is detected and accomodated in 
+#   _recurse_parse()
+my @binary_op_keywords = (
+  (map { "\Q$_\E" } (qw/< > != = <= >=/)),
+  '(?: NOT \s+)? LIKE',
+  '(?: NOT \s+)? BETWEEN',
 );
 
-my $tokenizer_re = qr/
-  \s*
-  (
-      \(
-    |
-      \)
-    |
-      $tokenizer_re_str
-  )
-  \s*
-/xi;
+my $tokenizer_re_str = join("\n\t|\n",
+  ( map { '\b' . $_ . '\b' } @expression_terminator_sql_keywords, 'AND', 'OR' ),
+  ( map { q! (?<= [\w\s\`\'\)] ) ! . $_ . q! (?= [\w\s\`\'\(] ) ! } @binary_op_keywords ),
+);
 
+my $tokenizer_re = qr/ \s* ( \( | \) | \? | $tokenizer_re_str ) \s* /xi;
+
+# All of these keywords allow their parameters to be specified with or without parenthesis without changing the semantics
+my @unrollable_ops = (
+  'ON',
+  'WHERE',
+  'GROUP \s+ BY',
+  'HAVING',
+  'ORDER \s+ BY',
+);
 
 sub is_same_sql_bind {
   my ($sql1, $bind_ref1, $sql2, $bind_ref2, $msg) = @_;
@@ -163,15 +174,11 @@ sub eq_sql {
   my $tree1 = parse($sql1);
   my $tree2 = parse($sql2);
 
-  return _eq_sql($tree1, $tree2);
+  return 1 if _eq_sql($tree1, $tree2);
 }
 
 sub _eq_sql {
   my ($left, $right) = @_;
-
-  # ignore top-level parentheses 
-  while ($left and $left->[0] and $left->[0]  eq 'PAREN') {$left  = $left->[1]}
-  while ($right and $right->[0] and $right->[0] eq 'PAREN') {$right = $right->[1]}
 
   # one is defined the other not
   if ( (defined $left) xor (defined $right) ) {
@@ -181,25 +188,105 @@ sub _eq_sql {
   elsif (not defined $left) {
     return 1;
   }
-  # if operators are different
-  elsif ($left->[0] ne $right->[0]) {
-    $sql_differ = sprintf "OP [$left->[0]] != [$right->[0]] in\nleft: %s\nright: %s\n",
-      unparse($left),
-      unparse($right);
+  # one is a list, the other is an op with a list
+  elsif (ref $left->[0] xor ref $right->[0]) {
+    $sql_differ = sprintf ("left: %s\nright: %s\n", map { unparse ($_) } ($left, $right) );
     return 0;
   }
-  # elsif operators are identical, compare operands
-  else { 
-    if ($left->[0] eq 'EXPR' ) { # unary operator
-      (my $l = " $left->[1] " ) =~ s/\s+/ /g;
-      (my $r = " $right->[1] ") =~ s/\s+/ /g;
-      my $eq = $case_sensitive ? $l eq $r : uc($l) eq uc($r);
-      $sql_differ = "[$left->[1]] != [$right->[1]]\n" if not $eq;
-      return $eq;
+  # one is a list, so is the other
+  elsif (ref $left->[0]) {
+    for (my $i = 0; $i <= $#$left or $i <= $#$right; $i++ ) {
+      return 0 if (not _eq_sql ($left->[$i], $right->[$i]) );
     }
-    else { # binary operator
-      return _eq_sql($left->[1][0], $right->[1][0])  # left operand
-          && _eq_sql($left->[1][1], $right->[1][1]); # right operand
+    return 1;
+  }
+  # both are an op-list combo
+  else {
+
+    for my $ast ($left, $right) {
+
+      next unless (ref $ast->[1]);
+
+      # unroll parenthesis in an elaborate loop
+      my $changes;
+      do {
+
+        my @children;
+        $changes = 0;
+
+        for my $child (@{$ast->[1]}) {
+          if (not ref $child or not $child->[0] eq 'PAREN') {
+            push @children, $child;
+            next;
+          }
+
+          # unroll nested parenthesis
+          while ($child->[1][0][0] eq 'PAREN') {
+            $child = $child->[1][0];
+            $changes++;
+          }
+
+          # if the parenthesis are wrapped around an AND/OR matching the parent AND/OR - open the parenthesis up and merge the list
+          if (
+            ( $ast->[0] eq 'AND' or $ast->[0] eq 'OR')
+              and
+            $child->[1][0][0] eq $ast->[0]
+          ) {
+            push @children, @{$child->[1][0][1]};
+            $changes++;
+          }
+
+          # if the parent operator explcitly allows it nuke the parenthesis
+          elsif ( grep { $ast->[0] =~ /^ $_ $/xi } @unrollable_ops ) {
+            push @children, $child->[1][0];
+            $changes++;
+          }
+
+          # only one element in the parenthesis which is a binary op with two EXPR sub-children
+          elsif (
+            @{$child->[1]} == 1
+              and
+            grep { $child->[1][0][0] =~ /^ $_ $/xi } (@binary_op_keywords)
+              and
+            $child->[1][0][1][0][0] eq 'EXPR'
+              and
+            $child->[1][0][1][1][0] eq 'EXPR'
+          ) {
+            push @children, $child->[1][0];
+            $changes++;
+          }
+
+          # otherwise no more mucking for this pass
+          else {
+            push @children, $child;
+          }
+        }
+
+        $ast->[1] = \@children;
+      } while ($changes);
+    }
+
+    # if operators are different
+    if ($left->[0] ne $right->[0]) {
+      $sql_differ = sprintf "OP [$left->[0]] != [$right->[0]] in\nleft: %s\nright: %s\n",
+        unparse($left),
+        unparse($right);
+      return 0;
+    }
+    # elsif operators are identical, compare operands
+    else { 
+      if ($left->[0] eq 'EXPR' ) { # unary operator
+        (my $l = " $left->[1][0] " ) =~ s/\s+/ /g;
+        (my $r = " $right->[1][0] ") =~ s/\s+/ /g;
+        my $eq = $case_sensitive ? $l eq $r : uc($l) eq uc($r);
+        $sql_differ = "[$l] != [$r]\n" if not $eq;
+        return $eq;
+      }
+      else {
+        my $eq = _eq_sql($left->[1], $right->[1]);
+        $sql_differ ||= sprintf ("left: %s\nright: %s\n", map { unparse ($_) } ($left, $right) ) if not $eq;
+        return $eq;
+      }
     }
   }
 }
@@ -214,7 +301,7 @@ sub parse {
     $token =~ s/\s+/ /g;
     $token =~ s/\s+([^\w\s])/$1/g;
     $token =~ s/([^\w\s])\s+/$1/g;
-    push @$tokens, $token if $token !~ /^$/;
+    push @$tokens, $token if length $token;
   }
 
   my $tree = _recurse_parse($tokens, PARSE_TOP_LEVEL);
@@ -228,37 +315,65 @@ sub _recurse_parse {
   while (1) { # left-associative parsing
 
     my $lookahead = $tokens->[0];
-    return $left if !defined($lookahead)
-      || ($state == PARSE_IN_PARENS && $lookahead eq ')')
-      || ($state == PARSE_IN_EXPR && grep { $lookahead =~ /^$_$/xi }
-            '\)', @expression_terminator_sql_keywords
-         );
+    if ( not defined($lookahead)
+          or
+        ($state == PARSE_IN_PARENS && $lookahead eq ')')
+          or
+        ($state == PARSE_IN_EXPR && grep { $lookahead =~ /^ $_ $/xi } ('\)', @expression_terminator_sql_keywords ) )
+          or
+        ($state == PARSE_RHS && grep { $lookahead =~ /^ $_ $/xi } ('\)', @expression_terminator_sql_keywords, @binary_op_keywords, 'AND', 'OR' ) )
+    ) {
+      return $left;
+    }
 
     my $token = shift @$tokens;
 
     # nested expression in ()
     if ($token eq '(') {
       my $right = _recurse_parse($tokens, PARSE_IN_PARENS);
-      $token = shift @$tokens   or croak "missing ')'";
-      $token eq ')'             or croak "unexpected token : $token";
-      $left = $left ? [CONCAT => [$left, [PAREN => $right]]]
-                    : [PAREN  => $right];
+      $token = shift @$tokens   or croak "missing closing ')' around block " . unparse ($right);
+      $token eq ')'             or croak "unexpected token '$token' terminating block " . unparse ($right);
+      $left = $left ? [@$left, [PAREN => [$right] ]]
+                    : [PAREN  => [$right] ];
     }
     # AND/OR
-    elsif ($token eq 'AND' || $token eq 'OR')  {
+    elsif ($token =~ /^ (?: OR | AND ) $/xi )  {
+      my $op = uc $token;
       my $right = _recurse_parse($tokens, PARSE_IN_EXPR);
-      $left = [$token => [$left, $right]];
+
+      # Merge chunks if logic matches
+      if (ref $right and $op eq $right->[0]) {
+        $left = [ (shift @$right ), [$left, map { @$_ } @$right] ];
+      }
+      else {
+       $left = [$op => [$left, $right]];
+      }
+    }
+    # binary operator keywords
+    elsif (grep { $token =~ /^ $_ $/xi } @binary_op_keywords ) {
+      my $op = uc $token;
+      my $right = _recurse_parse($tokens, PARSE_RHS);
+
+      # A between with a simple EXPR for a 1st RHS argument needs a
+      # rerun of the search to (hopefully) find the proper AND construct
+      if ($op eq 'BETWEEN' and $right->[0] eq 'EXPR') {
+        unshift @$tokens, $right->[1][0];
+        $right = _recurse_parse($tokens, PARSE_IN_EXPR);
+      }
+
+      $left = [$op => [$left, $right] ];
     }
     # expression terminator keywords (as they start a new expression)
-    elsif (grep { $token =~ /^$_$/xi } @expression_terminator_sql_keywords) {
+    elsif (grep { $token =~ /^ $_ $/xi } @expression_terminator_sql_keywords ) {
+      my $op = uc $token;
       my $right = _recurse_parse($tokens, PARSE_IN_EXPR);
-      $left = $left ? [CONCAT => [$left, [CONCAT => [[EXPR => $token], [PAREN => $right]]]]]
-                    : [CONCAT => [[EXPR => $token], [PAREN  => $right]]];
+      $left = $left ? [@$left,  [$op => [$right] ]]
+                    : [[ $op => [$right] ]];
     }
     # leaf expression
     else {
-      $left = $left ? [CONCAT => [$left, [EXPR => $token]]]
-                    : [EXPR   => $token];
+      $left = $left ? [@$left, [EXPR => [$token] ] ]
+                    : [ EXPR => [$token] ];
     }
   }
 }
@@ -267,14 +382,25 @@ sub _recurse_parse {
 
 sub unparse {
   my $tree = shift;
-  my $dispatch = {
-    EXPR   => sub {$tree->[1]                                   },
-    PAREN  => sub {"(" . unparse($tree->[1]) . ")"              },
-    CONCAT => sub {join " ",     map {unparse($_)} @{$tree->[1]}},
-    AND    => sub {join " AND ", map {unparse($_)} @{$tree->[1]}},
-    OR     => sub {join " OR ",  map {unparse($_)} @{$tree->[1]}},
-   };
-  $dispatch->{$tree->[0]}->();
+
+  if (not $tree ) {
+    return '';
+  }
+  elsif (ref $tree->[0]) {
+    return join (" ", map { unparse ($_) } @$tree);
+  }
+  elsif ($tree->[0] eq 'EXPR') {
+    return $tree->[1][0];
+  }
+  elsif ($tree->[0] eq 'PAREN') {
+    return sprintf '(%s)', join (" ", map {unparse($_)} @{$tree->[1]});
+  }
+  elsif ($tree->[0] eq 'OR' or $tree->[0] eq 'AND' or (grep { $tree->[0] =~ /^ $_ $/xi } @binary_op_keywords ) ) {
+    return join (" $tree->[0] ", map {unparse($_)} @{$tree->[1]});
+  }
+  else {
+    return sprintf '%s %s', $tree->[0], unparse ($tree->[1]);
+  }
 }
 
 

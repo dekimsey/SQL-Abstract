@@ -1,18 +1,29 @@
-# http://module-build.sourceforge.net/META-spec.html
-#XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
-name:         SQL-Abstract
-version:      1.50
-version_from: lib/SQL/Abstract.pm
-installdirs:  site
+--- #YAML:1.0
+name:               SQL-Abstract
+version:            1.51
+abstract:           Generate SQL from Perl data structures
+author:
+    - Matt Trout <mst@shadowcat.co.uk>, but see the POD
+license:            unknown
+distribution_type:  module
+configure_requires:
+    ExtUtils::MakeMaker:  0
+build_requires:
+    ExtUtils::MakeMaker:  0
 requires:
-    Data::Dumper:                  0
-    List::Util:                    0
-    Scalar::Util:                  0
-    Test::Builder:                 0
-    Test::Deep:                    0
-    Test::Exception:               0
-    Test::More:                    0
-    Test::Warn:                    0
-
-distribution_type: module
-generated_by: ExtUtils::MakeMaker version 6.30_01
+    Data::Dumper:     0
+    List::Util:       0
+    Scalar::Util:     0
+    Test::Builder:    0
+    Test::Deep:       0
+    Test::Exception:  0
+    Test::More:       0
+    Test::Warn:       0
+no_index:
+    directory:
+        - t
+        - inc
+generated_by:       ExtUtils::MakeMaker version 6.50
+meta-spec:
+    url:      http://module-build.sourceforge.net/META-spec-v1.4.html
+    version:  1.4

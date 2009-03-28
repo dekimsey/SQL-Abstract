@@ -1,6 +1,5 @@
 Changes
 INSTALL
-lib/SQL/.Abstract.pm.swp
 lib/SQL/Abstract.pm
 lib/SQL/Abstract/Test.pm
 Makefile.PL
@@ -9,6 +8,7 @@ t/00new.t
 t/01generate.t
 t/02where.t
 t/03values.t
+t/04modifiers.t
 t/06order_by.t
 t/07subqueries.t
 t/08special_ops.t

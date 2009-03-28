@@ -97,6 +97,32 @@ my @sql_tests = (
           /,
         ]
       },
+      {
+        equal => 1,
+        statements => [
+          q/SELECT foo FROM bar WHERE a = 1 AND b = 1 AND c = 1/,
+          q/SELECT foo FROM bar WHERE (a = 1 AND b = 1) AND c = 1/,
+          q/SELECT foo FROM bar WHERE a = 1 AND (b = 1 AND c = 1)/,
+          q/SELECT foo FROM bar WHERE ((((a = 1))) AND (b = 1 AND c = 1))/,
+        ]
+      },
+      {
+        equal => 1,
+        statements => [
+          q/SELECT foo FROM bar WHERE a = 1 OR b = 1 OR c = 1/,
+          q/SELECT foo FROM bar WHERE (a = 1 OR b = 1) OR c = 1/,
+          q/SELECT foo FROM bar WHERE a = 1 OR (b = 1 OR c = 1)/,
+          q/SELECT foo FROM bar WHERE a = 1 OR ((b = 1 OR (c = 1)))/,
+        ]
+      },
+      {
+        equal => 1,
+        statements => [
+          q/SELECT foo FROM bar WHERE (a = 1) AND (b = 1 OR c = 1 OR d = 1) AND (e = 1 AND f = 1)/,
+          q/SELECT foo FROM bar WHERE a = 1 AND (b = 1 OR c = 1 OR d = 1) AND e = 1 AND (f = 1)/,
+          q/SELECT foo FROM bar WHERE ( ((a = 1) AND ( b = 1 OR (c = 1 OR d = 1) )) AND ((e = 1)) AND f = 1) /,
+        ]
+      },
 
       # WHERE condition - different
       {
@@ -156,6 +182,36 @@ my @sql_tests = (
           q/SELECT foo FROM bar WHERE a = 1 AND b = 1 OFFSET 1/,
           q/SELECT foo FROM bar JOIN quux WHERE a = 1 AND b = 1/,
           q/SELECT foo FROM bar JOIN quux ON a = 1 WHERE a = 1 AND b = 1/,
+        ]
+      },
+      {
+        equal => 0,
+        statements => [
+          q/SELECT foo FROM bar WHERE a = 1 AND b = 1 OR c = 1/,
+          q/SELECT foo FROM bar WHERE (a = 1 AND b = 1) OR c = 1/,
+          q/SELECT foo FROM bar WHERE a = 1 AND (b = 1 OR c = 1)/,
+        ]
+      },
+      {
+        equal => 0,
+        statements => [
+          q/SELECT foo FROM bar WHERE a = 1 OR b = 1 AND c = 1/,
+          q/SELECT foo FROM bar WHERE (a = 1 OR b = 1) AND c = 1/,
+          q/SELECT foo FROM bar WHERE a = 1 OR (b = 1 AND c = 1)/,
+        ]
+      },
+      {
+        equal => 0,
+        statements => [
+          # BETWEEN with/without parenthesis around itself/RHS is a sticky business
+          # if I made a mistake here, simply rewrite the special BETWEEN handling in
+          # _recurse_parse()
+          #
+          # by RIBASUSHI
+          q/SELECT foo FROM bar WHERE ( completion_date BETWEEN ? AND ? AND status = ? )/,
+          q/SELECT foo FROM bar WHERE completion_date BETWEEN (? AND ?) AND status = ?/,
+          q/SELECT foo FROM bar WHERE ( (completion_date BETWEEN (? AND ?) ) AND status = ? )/,
+          q/SELECT foo FROM bar WHERE ( (completion_date BETWEEN (? AND ? AND status = ?) ) )/,
         ]
       },
 
@@ -667,15 +723,19 @@ for my $test (@sql_tests) {
     my $sql1 = shift @$statements;
     foreach my $sql2 (@$statements) {
       my $equal = eq_sql($sql1, $sql2);
-      if ($test->{equal}) {
-        ok($equal, "equal SQL expressions considered equal");
-      } else {
-        ok(!$equal, "different SQL expressions considered not equal");
-      }
+      TODO: {
+        local $TODO = $test->{todo} if $test->{todo};
 
-      if ($equal ^ $test->{equal}) {
-        diag("sql1: $sql1");
-        diag("sql2: $sql2");
+        if ($test->{equal}) {
+          ok($equal, "equal SQL expressions should have been considered equal");
+        } else {
+          ok(!$equal, "different SQL expressions should have been considered not equal");
+        }
+
+        if ($equal ^ $test->{equal}) {
+          diag("sql1: $sql1");
+          diag("sql2: $sql2");
+        }
       }
     }
   }

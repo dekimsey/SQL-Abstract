@@ -15,7 +15,7 @@ use Scalar::Util qw/blessed/;
 # GLOBALS
 #======================================================================
 
-our $VERSION  = '1.50';
+our $VERSION  = '1.51';
 
 # This would confuse some packagers
 #$VERSION      = eval $VERSION; # numify for warning-free dev releases
@@ -367,17 +367,7 @@ sub _where_ARRAYREF {
 
   my @clauses = @$where;
 
-  # if the array starts with [-and|or => ...], recurse with that logic
-  my $first   = $clauses[0] || '';
-  if ($first =~ /^-(and|or)/i) {
-    $logic = $1;
-    shift @clauses;
-    return $self->_where_ARRAYREF(\@clauses, $logic);
-  }
-
-  #otherwise..
   my (@sql_clauses, @all_bind);
-
   # need to use while() so can shift() for pairs
   while (my $el = shift @clauses) { 
 
@@ -452,25 +442,27 @@ sub _where_HASHREF {
 
 
 sub _where_op_in_hash {
-  my ($self, $op, $v) = @_; 
+  my ($self, $op_str, $v) = @_; 
 
-  $op =~ /^(AND|OR|NEST)[_\d]*/i
-    or puke "unknown operator: -$op";
-  $op = uc($1); # uppercase, remove trailing digits
+  $op_str =~ /^ (AND|OR|NEST) ( \_? \d* ) $/xi
+    or puke "unknown operator: -$op_str";
+
+  my $op = uc($1); # uppercase, remove trailing digits
+  if ($2) {
+    belch 'Use of [and|or|nest]_N modifiers is deprecated and will be removed in SQLA v2.0. '
+          . "You probably wanted ...-and => [ $op_str => COND1, $op_str => COND2 ... ]";
+  }
+
   $self->_debug("OP(-$op) within hashref, recursing...");
 
   $self->_SWITCH_refkind($v, {
 
     ARRAYREF => sub {
-      # LDNOTE : should deprecate {-or => [...]} and {-and => [...]}
-      # because they are misleading; the only proper way would be
-      # -nest => [-or => ...], -nest => [-and ...]
       return $self->_where_ARRAYREF($v, $op eq 'NEST' ? '' : $op);
     },
 
     HASHREF => sub {
       if ($op eq 'OR') {
-        belch "-or => {...} should be -nest => [...]";
         return $self->_where_ARRAYREF([%$v], 'OR');
       } 
       else {                  # NEST | AND
@@ -513,13 +505,20 @@ sub _where_hashpair_ARRAYREF {
     $self->_debug("ARRAY($k) means distribute over elements");
 
     # put apart first element if it is an operator (-and, -or)
-    my $op = $v[0] =~ /^-/ ? shift @v : undef;
-    $self->_debug("OP($op) reinjected into the distributed array") if $op;
-
+    my $op = ($v[0] =~ /^ - (?: AND|OR ) $/ix
+      ? shift @v
+      : ''
+    );
     my @distributed = map { {$k =>  $_} } @v;
-    unshift @distributed, $op if $op;
 
-    return $self->_recurse_where(\@distributed);
+    if ($op) {
+      $self->_debug("OP($op) reinjected into the distributed array");
+      unshift @distributed, $op;
+    }
+
+    my $logic = $op ? substr($op, 1) : '';
+
+    return $self->_recurse_where(\@distributed, $logic);
   } 
   else {
     # LDNOTE : not sure of this one. What does "distribute over nothing" mean?
@@ -603,18 +602,17 @@ sub _where_field_op_ARRAYREF {
   if(@$vals) {
     $self->_debug("ARRAY($vals) means multiple elements: [ @$vals ]");
 
-
-
-    # LDNOTE : change the distribution logic when 
+    # LDNOTE : had planned to change the distribution logic when 
     # $op =~ $self->{inequality_op}, because of Morgan laws : 
     # with {field => {'!=' => [22, 33]}}, it would be ridiculous to generate
     # WHERE field != 22 OR  field != 33 : the user probably means 
     # WHERE field != 22 AND field != 33.
-    my $logic = ($op =~ $self->{inequality_op}) ? 'AND' : 'OR';
+    # To do this, replace the line below by :
+    # my $logic = ($op =~ $self->{inequality_op}) ? 'AND' : 'OR';
+    # return $self->_recurse_where([map { {$k => {$op, $_}} } @$vals], $logic);
 
     # distribute $op over each member of @$vals
-    return $self->_recurse_where([map { {$k => {$op, $_}} } @$vals], $logic);
-
+    return $self->_recurse_where([map { {$k => {$op, $_}} } @$vals]);
   } 
   else {
     # try to DWIM on equality operators 
@@ -1327,7 +1325,8 @@ By default these are C<1=1> and C<1=0>.
 =item logic
 
 This determines the default logical operator for multiple WHERE
-statements in arrays. By default it is "or", meaning that a WHERE
+statements in arrays or hashes. If absent, the default logic is "or"
+for arrays, and "and" for hashes. This means that a WHERE
 array of the form:
 
     @where = (
@@ -1335,7 +1334,7 @@ array of the form:
         event_date => {'<=', '4/24/03'}, 
     );
 
-Will generate SQL like this:
+will generate SQL like this:
 
     WHERE event_date >= '2/13/99' OR event_date <= '4/24/03'
 
@@ -1349,10 +1348,10 @@ Which will change the above C<WHERE> to:
     WHERE event_date >= '2/13/99' AND event_date <= '4/24/03'
 
 The logic can also be changed locally by inserting
-an extra first element in the array :
+a modifier in front of an arrayref :
 
-    @where = (-and => event_date => {'>=', '2/13/99'}, 
-                      event_date => {'<=', '4/24/03'} );
+    @where = (-and => [event_date => {'>=', '2/13/99'}, 
+                       event_date => {'<=', '4/24/03'} ]);
 
 See the L</"WHERE CLAUSES"> section for explanations.
 
@@ -1637,8 +1636,8 @@ This simple code will create the following:
     $stmt = "WHERE user = ? AND ( status = ? OR status = ? OR status = ? )";
     @bind = ('nwiger', 'assigned', 'in-progress', 'pending');
 
-An empty arrayref will be considered a logical false and
-will generate 0=1.
+A field associated to an empty arrayref will be considered a 
+logical false and will generate 0=1.
 
 =head2 Key-value pairs
 
@@ -1657,19 +1656,9 @@ Which would generate:
 
 To test against multiple values, just enclose the values in an arrayref:
 
-    status => { '!=', ['assigned', 'in-progress', 'pending'] };
-
-Which would give you:
-
-    "WHERE status != ? AND status != ? AND status != ?"
-
-Notice that since the operator was recognized as being a 'negative' 
-operator, the arrayref was interpreted with 'AND' logic (because
-of Morgan's laws). By contrast, the reverse
-
     status => { '=', ['assigned', 'in-progress', 'pending'] };
 
-would generate :
+Which would give you:
 
     "WHERE status = ? OR status = ? OR status = ?"
 
@@ -1757,29 +1746,6 @@ Here is a quick list of equivalencies, since there is some overlap:
     status => [ -or => {'=', 'assigned'}, {'=', 'in-progress'}]
     status => [ {'=', 'assigned'}, {'=', 'in-progress'} ]
 
-In addition to C<-and> and C<-or>, there is also a special C<-nest>
-operator which adds an additional set of parens, to create a subquery.
-For example, to get something like this:
-
-    $stmt = "WHERE user = ? AND ( workhrs > ? OR geo = ? )";
-    @bind = ('nwiger', '20', 'ASIA');
-
-You would do:
-
-    my %where = (
-         user => 'nwiger',
-        -nest => [ workhrs => {'>', 20}, geo => 'ASIA' ],
-    );
-
-If you need several nested subexpressions, you can number
-the C<-nest> branches :
-
-    my %where = (
-         user => 'nwiger',
-        -nest1 => ...,
-        -nest2 => ...,
-        ...
-    );
 
 
 =head2 Special operators : IN, BETWEEN, etc.
@@ -1817,7 +1783,7 @@ Would give you:
 These are the two builtin "special operators"; but the 
 list can be expanded : see section L</"SPECIAL OPERATORS"> below.
 
-=head2 Nested conditions
+=head2 Nested conditions, -and/-or prefixes
 
 So far, we've seen how multiple conditions are joined with a top-level
 C<AND>.  We can change this by putting the different conditions we want in
@@ -1840,15 +1806,32 @@ This data structure would create the following:
                 OR ( user = ? AND status = ? ) )";
     @bind = ('nwiger', 'pending', 'dispatched', 'robot', 'unassigned');
 
-This can be combined with the C<-nest> operator to properly group
-SQL statements:
+
+There is also a special C<-nest>
+operator which adds an additional set of parens, to create a subquery.
+For example, to get something like this:
+
+    $stmt = "WHERE user = ? AND ( workhrs > ? OR geo = ? )";
+    @bind = ('nwiger', '20', 'ASIA');
+
+You would do:
+
+    my %where = (
+         user => 'nwiger',
+        -nest => [ workhrs => {'>', 20}, geo => 'ASIA' ],
+    );
+
+
+Finally, clauses in hashrefs or arrayrefs can be
+prefixed with an C<-and> or C<-or> to change the logic
+inside :
 
     my @where = (
          -and => [
             user => 'nwiger',
             -nest => [
-                ["-and", workhrs => {'>', 20}, geo => 'ASIA' ],
-                ["-and", workhrs => {'<', 50}, geo => 'EURO' ]
+                -and => [workhrs => {'>', 20}, geo => 'ASIA' ],
+                -and => [workhrs => {'<', 50}, geo => 'EURO' ]
             ],
         ],
     );
@@ -1858,6 +1841,37 @@ That would yield:
     WHERE ( user = ? AND 
           ( ( workhrs > ? AND geo = ? )
          OR ( workhrs < ? AND geo = ? ) ) )
+
+
+=head2 Algebraic inconsistency, for historical reasons
+
+C<Important note>: when connecting several conditions, the C<-and->|C<-or>
+operator goes C<outside> of the nested structure; whereas when connecting
+several constraints on one column, the C<-and> operator goes
+C<inside> the arrayref. Here is an example combining both features :
+
+   my @where = (
+     -and => [a => 1, b => 2],
+     -or  => [c => 3, d => 4],
+      e   => [-and => {-like => 'foo%'}, {-like => '%bar'} ]
+   )
+
+yielding
+
+  WHERE ( (    ( a = ? AND b = ? ) 
+            OR ( c = ? OR d = ? ) 
+            OR ( e LIKE ? AND e LIKE ? ) ) )
+
+This difference in syntax is unfortunate but must be preserved for
+historical reasons. So be careful : the two examples below would
+seem algebraically equivalent, but they are not
+
+  {col => [-and => {-like => 'foo%'}, {-like => '%bar'}]} 
+  # yields : WHERE ( ( col LIKE ? AND col LIKE ? ) )
+
+  [-and => {col => {-like => 'foo%'}, {col => {-like => '%bar'}}]] 
+  # yields : WHERE ( ( col LIKE ? OR col LIKE ? ) )
+
 
 =head2 Literal SQL
 
@@ -1920,12 +1934,12 @@ This would create:
     @bind = ('10');
 
 Note that you must pass the bind values in the same format as they are returned
-by C</where>. That means that if you set L</bindtype> to C<columns>, you must
+by L</where>. That means that if you set L</bindtype> to C<columns>, you must
 provide the bind values in the C<< [ column_meta => value ] >> format, where
 C<column_meta> is an opaque scalar value; most commonly the column name, but
-you can use any scalar scalar value (including references and blessed
-references), L<SQL::Abstract> will simply pass it through intact. So eg. the
-above example will look like:
+you can use any scalar value (including references and blessed references),
+L<SQL::Abstract> will simply pass it through intact. So if C<bindtype> is set
+to C<columns> the above example will look like:
 
     my %where = (
        date_column => \[q/= date '2008-09-30' - ?::integer/, [ dummy => 10 ]/]
@@ -2202,10 +2216,6 @@ support for the { operator => \["...", @bind] } construct (to embed literal SQL 
 
 =item *
 
-added -nest1, -nest2 or -nest_1, -nest_2, ...
-
-=item *
-
 optional support for L<array datatypes|/"Inserting and Updating Arrays">
 
 =item * 
@@ -2215,21 +2225,12 @@ defensive programming : check arguments
 =item *
 
 fixed bug with global logic, which was previously implemented
-through global variables yielding side-effects. Prior versons would
+through global variables yielding side-effects. Prior versions would
 interpret C<< [ {cond1, cond2}, [cond3, cond4] ] >>
 as C<< "(cond1 AND cond2) OR (cond3 AND cond4)" >>.
 Now this is interpreted
 as C<< "(cond1 AND cond2) OR (cond3 OR cond4)" >>.
 
-=item *
-
-C<-and> / C<-or> operators are no longer accepted
-in the middle of an arrayref : they are
-only admitted if in first position.
-
-=item *
-
-changed logic for distributing an op over arrayrefs
 
 =item *
 
