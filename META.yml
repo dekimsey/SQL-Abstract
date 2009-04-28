@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               SQL-Abstract
-version:            1.51
+version:            1.52
 abstract:           Generate SQL from Perl data structures
 author:
     - Matt Trout <mst@shadowcat.co.uk>, but see the POD

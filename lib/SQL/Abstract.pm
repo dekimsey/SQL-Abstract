@@ -15,7 +15,7 @@ use Scalar::Util qw/blessed/;
 # GLOBALS
 #======================================================================
 
-our $VERSION  = '1.51';
+our $VERSION  = '1.52';
 
 # This would confuse some packagers
 #$VERSION      = eval $VERSION; # numify for warning-free dev releases
@@ -63,7 +63,7 @@ sub new {
   delete $opt{case} if $opt{case} && $opt{case} ne 'lower';
 
   # default logic for interpreting arrayrefs
-  $opt{logic} = uc $opt{logic} || 'OR';
+  $opt{logic} = $opt{logic} ? uc $opt{logic} : 'OR';
 
   # how to return bind vars
   # LDNOTE: changed nwiger code : why this 'delete' ??
@@ -505,9 +505,10 @@ sub _where_hashpair_ARRAYREF {
     $self->_debug("ARRAY($k) means distribute over elements");
 
     # put apart first element if it is an operator (-and, -or)
-    my $op = ($v[0] =~ /^ - (?: AND|OR ) $/ix
-      ? shift @v
-      : ''
+    my $op = (
+       (defined $v[0] && $v[0] =~ /^ - (?: AND|OR ) $/ix)
+         ? shift @v
+         : ''
     );
     my @distributed = map { {$k =>  $_} } @v;
 
@@ -528,9 +529,10 @@ sub _where_hashpair_ARRAYREF {
 }
 
 sub _where_hashpair_HASHREF {
-  my ($self, $k, $v) = @_;
+  my ($self, $k, $v, $logic) = @_;
+  $logic ||= 'and';
 
-  my (@all_sql, @all_bind);
+  my ($all_sql, @all_bind);
 
   for my $op (sort keys %$v) {
     my $val = $v->{$op};
@@ -571,6 +573,10 @@ sub _where_hashpair_HASHREF {
           @bind = @sub_bind;
         },
 
+        HASHREF => sub {
+          ($sql, @bind) = $self->_where_hashpair_HASHREF($k, $val, $op);
+        },
+
         UNDEF => sub {          # CASE: col => {op => undef} : sql "IS (NOT)? NULL"
           my $is = ($op =~ $self->{equality_op})   ? 'is'     :
                    ($op =~ $self->{inequality_op}) ? 'is not' :
@@ -587,11 +593,10 @@ sub _where_hashpair_HASHREF {
       });
     }
 
-    push @all_sql, $sql;
+    ($all_sql) = (defined $all_sql and $all_sql) ? $self->_join_sql_clauses($logic, [$all_sql, $sql], []) : $sql;
     push @all_bind, @bind;
   }
-
-  return $self->_join_sql_clauses('and', \@all_sql, \@all_bind);
+  return ($all_sql, @all_bind);
 }
 
 
@@ -602,17 +607,25 @@ sub _where_field_op_ARRAYREF {
   if(@$vals) {
     $self->_debug("ARRAY($vals) means multiple elements: [ @$vals ]");
 
+    # see if the first element is an -and/-or op
+    my $logic;
+    if ($vals->[0] =~ /^ - ( AND|OR ) $/ix) {
+      $logic = uc $1;
+      shift @$vals;
+    }
+
+    # distribute $op over each remaining member of @$vals, append logic if exists
+    return $self->_recurse_where([map { {$k => {$op, $_}} } @$vals], $logic);
+
     # LDNOTE : had planned to change the distribution logic when 
     # $op =~ $self->{inequality_op}, because of Morgan laws : 
     # with {field => {'!=' => [22, 33]}}, it would be ridiculous to generate
     # WHERE field != 22 OR  field != 33 : the user probably means 
     # WHERE field != 22 AND field != 33.
-    # To do this, replace the line below by :
+    # To do this, replace the above to roughly :
     # my $logic = ($op =~ $self->{inequality_op}) ? 'AND' : 'OR';
     # return $self->_recurse_where([map { {$k => {$op, $_}} } @$vals], $logic);
 
-    # distribute $op over each member of @$vals
-    return $self->_recurse_where([map { {$k => {$op, $_}} } @$vals]);
   } 
   else {
     # try to DWIM on equality operators 
@@ -699,16 +712,39 @@ sub _where_UNDEF {
 sub _where_field_BETWEEN {
   my ($self, $k, $op, $vals) = @_;
 
-  ref $vals eq 'ARRAY' && @$vals == 2 
-    or puke "special op 'between' requires an arrayref of two values";
+  (ref $vals eq 'ARRAY' && @$vals == 2) or 
+  (ref $vals eq 'REF' && (@$$vals == 1 || @$$vals == 2 || @$$vals == 3))
+    or puke "special op 'between' requires an arrayref of two values (or a scalarref or arrayrefref for literal SQL)";
 
-  my ($label)       = $self->_convert($self->_quote($k));
-  my ($placeholder) = $self->_convert('?');
-  my $and           = $self->_sqlcase('and');
+  my ($clause, @bind, $label, $and, $placeholder);
+  $label       = $self->_convert($self->_quote($k));
+  $and         = ' ' . $self->_sqlcase('and') . ' ';
+  $placeholder = $self->_convert('?');
   $op               = $self->_sqlcase($op);
 
-  my $sql  = "( $label $op $placeholder $and $placeholder )";
-  my @bind = $self->_bindtype($k, @$vals);
+  if (ref $vals eq 'REF') {
+    ($clause, @bind) = @$$vals;
+  }
+  else {
+    my (@all_sql, @all_bind);
+
+    foreach my $val (@$vals) {
+      my ($sql, @bind) = $self->_SWITCH_refkind($val, {
+         SCALAR => sub {
+           return ($placeholder, ($val));
+         },
+         SCALARREF => sub {
+           return ($self->_convert($$val), ());
+         },
+      });
+      push @all_sql, $sql;
+      push @all_bind, @bind;
+    }
+
+    $clause = (join $and, @all_sql);
+    @bind = $self->_bindtype($k, @all_bind);
+  }
+  my $sql = "( $label $op $clause )";
   return ($sql, @bind)
 }
 
@@ -802,7 +838,8 @@ sub _order_by_hash {
   my ($order) = ($key =~ /^-(desc|asc)/i)
     or puke "invalid key in _order_by hash : $key";
 
-  return $self->_quote($val) ." ". $self->_sqlcase($order);
+  $val = ref $val eq 'ARRAY' ? $val : [$val];
+  return join ', ', map { $self->_quote($_) . ' ' . $self->_sqlcase($order) } @$val;
 }
 
 
@@ -1320,7 +1357,9 @@ the huge section on L</"WHERE CLAUSES"> at the bottom.
 =item sqltrue, sqlfalse
 
 Expressions for inserting boolean values within SQL statements.
-By default these are C<1=1> and C<1=0>.
+By default these are C<1=1> and C<1=0>. They are used
+by the special operators C<-in> and C<-not_in> for generating
+correct SQL even when the argument is an empty array (see below).
 
 =item logic
 
@@ -1639,7 +1678,7 @@ This simple code will create the following:
 A field associated to an empty arrayref will be considered a 
 logical false and will generate 0=1.
 
-=head2 Key-value pairs
+=head2 Specific comparison operators
 
 If you want to specify a different type of operator for your comparison,
 you can use a hashref for a given column:
@@ -1765,6 +1804,12 @@ Which would generate:
 
 The reverse operator C<-not_in> generates SQL C<NOT IN> and is used in 
 the same way.
+
+If the argument to C<-in> is an empty array, 'sqlfalse' is generated
+(by default : C<1=0>). Similarly, C<< -not_in => [] >> generates
+'sqltrue' (by default : C<1=1>).
+
+
 
 Another pair of operators is C<-between> and C<-not_between>, 
 used with an arrayref of two values:
@@ -2050,19 +2095,29 @@ Some functions take an order by clause. This can either be a scalar (just a
 column name,) a hash of C<< { -desc => 'col' } >> or C<< { -asc => 'col' } >>,
 or an array of either of the two previous forms. Examples:
 
-             Given             |    Will Generate
+               Given            |         Will Generate
     ----------------------------------------------------------
-    \'colA DESC'               | ORDER BY colA DESC
-    'colA'                     | ORDER BY colA
-    [qw/colA colB/]            | ORDER BY colA, colB
-    {-asc  => 'colA'}          | ORDER BY colA ASC
-    {-desc => 'colB'}          | ORDER BY colB DESC
-    [                          |
-      {-asc  => 'colA'},       | ORDER BY colA ASC, colB DESC
-      {-desc => 'colB'}        |
-    ]                          |
-    [colA => {-asc => 'colB'}] | ORDER BY colA, colB ASC
-    ==========================================================
+                                |
+    \'colA DESC'                | ORDER BY colA DESC
+                                |
+    'colA'                      | ORDER BY colA
+                                |
+    [qw/colA colB/]             | ORDER BY colA, colB
+                                |
+    {-asc  => 'colA'}           | ORDER BY colA ASC
+                                |
+    {-desc => 'colB'}           | ORDER BY colB DESC
+                                |
+    ['colA', {-asc => 'colB'}]  | ORDER BY colA, colB ASC
+                                |
+    { -asc => [qw/colA colB] }  | ORDER BY colA ASC, colB ASC
+                                |
+    [                           |
+      { -asc => 'colA' },       | ORDER BY colA ASC, colB DESC,
+      { -desc => [qw/colB/],    |          colC ASC, colD ASC
+      { -asc => [qw/colC colD/],|
+    ]                           |
+    ===========================================================
 
 
 
@@ -2266,6 +2321,7 @@ so I have no idea who they are! But the people I do know are:
     Guillermo Roditi (patch to cleanup "IN" and "BETWEEN", fix and tests for _order_by)
     Laurent Dami (internal refactoring, multiple -nest, extensible list of special operators, literal SQL)
     Norbert Buchmuller (support for literal SQL in hashpair, misc. fixes & tests)
+    Peter Rabbitson (rewrite of SQLA::Test, misc. fixes & tests)
 
 Thanks!
 

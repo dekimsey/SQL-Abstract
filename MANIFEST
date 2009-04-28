@@ -9,6 +9,7 @@ t/01generate.t
 t/02where.t
 t/03values.t
 t/04modifiers.t
+t/05between.t
 t/06order_by.t
 t/07subqueries.t
 t/08special_ops.t
