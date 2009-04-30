@@ -15,7 +15,7 @@ use Scalar::Util qw/blessed/;
 # GLOBALS
 #======================================================================
 
-our $VERSION  = '1.52';
+our $VERSION  = '1.53';
 
 # This would confuse some packagers
 #$VERSION      = eval $VERSION; # numify for warning-free dev releases
@@ -422,7 +422,6 @@ sub _where_HASHREF {
   my ($self, $where) = @_;
   my (@sql_clauses, @all_bind);
 
-  # LDNOTE : don't really know why we need to sort keys
   for my $k (sort keys %$where) { 
     my $v = $where->{$k};
 
@@ -463,7 +462,7 @@ sub _where_op_in_hash {
 
     HASHREF => sub {
       if ($op eq 'OR') {
-        return $self->_where_ARRAYREF([%$v], 'OR');
+        return $self->_where_ARRAYREF([ map { $_ => $v->{$_} } (sort keys %$v) ], 'OR');
       } 
       else {                  # NEST | AND
         return $self->_where_HASHREF($v);
@@ -2339,6 +2338,8 @@ For support, your best bet is to try the C<DBIx::Class> users mailing list.
 While not an official support venue, C<DBIx::Class> makes heavy use of
 C<SQL::Abstract>, and as such list members there are very familiar with
 how to create queries.
+
+=head1 LICENSE
 
 This module is free software; you may copy this under the terms of
 the GNU General Public License, or the Artistic License, copies of

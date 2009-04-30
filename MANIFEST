@@ -1,9 +1,18 @@
 Changes
+inc/Module/Install.pm
+inc/Module/Install/Base.pm
+inc/Module/Install/Can.pm
+inc/Module/Install/Fetch.pm
+inc/Module/Install/Makefile.pm
+inc/Module/Install/Metadata.pm
+inc/Module/Install/Win32.pm
+inc/Module/Install/WriteAll.pm
 INSTALL
 lib/SQL/Abstract.pm
 lib/SQL/Abstract/Test.pm
 Makefile.PL
 MANIFEST			This list of files
+META.yml
 t/00new.t
 t/01generate.t
 t/02where.t
@@ -15,4 +24,3 @@ t/07subqueries.t
 t/08special_ops.t
 t/09refkind.t
 t/10test.t
-META.yml                                 Module meta-data (added by MakeMaker)

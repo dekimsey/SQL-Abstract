@@ -1,29 +1,26 @@
---- #YAML:1.0
-name:               SQL-Abstract
-version:            1.52
-abstract:           Generate SQL from Perl data structures
+---
+abstract: 'Generate SQL from Perl data structures'
 author:
-    - Matt Trout <mst@shadowcat.co.uk>, but see the POD
-license:            unknown
-distribution_type:  module
-configure_requires:
-    ExtUtils::MakeMaker:  0
+  - 'Nathan Wiger <nate@wiger.org>'
 build_requires:
-    ExtUtils::MakeMaker:  0
-requires:
-    Data::Dumper:     0
-    List::Util:       0
-    Scalar::Util:     0
-    Test::Builder:    0
-    Test::Deep:       0
-    Test::Exception:  0
-    Test::More:       0
-    Test::Warn:       0
-no_index:
-    directory:
-        - t
-        - inc
-generated_by:       ExtUtils::MakeMaker version 6.50
+  Test::Builder: 0
+  Test::Deep: 0
+  Test::Exception: 0
+  Test::More: 0
+  Test::Warn: 0
+distribution_type: module
+generated_by: 'Module::Install version 0.79'
+license: gpl
 meta-spec:
-    url:      http://module-build.sourceforge.net/META-spec-v1.4.html
-    version:  1.4
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
+name: SQL-Abstract
+no_index:
+  directory:
+    - inc
+    - t
+requires:
+  List::Util: 0
+  Scalar::Util: 0
+  perl: 5.6.1
+version: 1.53
