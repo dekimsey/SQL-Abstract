@@ -15,7 +15,7 @@ use Scalar::Util qw/blessed/;
 # GLOBALS
 #======================================================================
 
-our $VERSION  = '1.54';
+our $VERSION  = '1.55';
 
 # This would confuse some packagers
 #$VERSION      = eval $VERSION; # numify for warning-free dev releases
@@ -615,18 +615,20 @@ sub _where_hashpair_HASHREF {
 sub _where_field_op_ARRAYREF {
   my ($self, $k, $op, $vals) = @_;
 
-  if(@$vals) {
-    $self->_debug("ARRAY($vals) means multiple elements: [ @$vals ]");
+  my @vals = @$vals;  #always work on a copy
+
+  if(@vals) {
+    $self->_debug("ARRAY($vals) means multiple elements: [ @vals ]");
 
     # see if the first element is an -and/-or op
     my $logic;
-    if ($vals->[0] =~ /^ - ( AND|OR ) $/ix) {
+    if ($vals[0] =~ /^ - ( AND|OR ) $/ix) {
       $logic = uc $1;
-      shift @$vals;
+      shift @vals;
     }
 
-    # distribute $op over each remaining member of @$vals, append logic if exists
-    return $self->_recurse_where([map { {$k => {$op, $_}} } @$vals], $logic);
+    # distribute $op over each remaining member of @vals, append logic if exists
+    return $self->_recurse_where([map { {$k => {$op, $_}} } @vals], $logic);
 
     # LDNOTE : had planned to change the distribution logic when 
     # $op =~ $self->{inequality_op}, because of Morgan laws : 
@@ -635,7 +637,7 @@ sub _where_field_op_ARRAYREF {
     # WHERE field != 22 AND field != 33.
     # To do this, replace the above to roughly :
     # my $logic = ($op =~ $self->{inequality_op}) ? 'AND' : 'OR';
-    # return $self->_recurse_where([map { {$k => {$op, $_}} } @$vals], $logic);
+    # return $self->_recurse_where([map { {$k => {$op, $_}} } @vals], $logic);
 
   } 
   else {
