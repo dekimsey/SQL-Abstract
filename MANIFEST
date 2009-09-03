@@ -24,3 +24,5 @@ t/07subqueries.t
 t/08special_ops.t
 t/09refkind.t
 t/10test.t
+t/90pod.t
+t/91podcoverage.t
