@@ -15,7 +15,7 @@ use Scalar::Util qw/blessed/;
 # GLOBALS
 #======================================================================
 
-our $VERSION  = '1.58';
+our $VERSION  = '1.60';
 
 # This would confuse some packagers
 #$VERSION      = eval $VERSION; # numify for warning-free dev releases
@@ -708,11 +708,14 @@ sub _where_field_op_ARRAYREF {
   my @vals = @$vals;  #always work on a copy
 
   if(@vals) {
-    $self->_debug("ARRAY($vals) means multiple elements: [ @vals ]");
+    $self->_debug(sprintf '%s means multiple elements: [ %s ]',
+      $vals,
+      join (', ', map { defined $_ ? "'$_'" : 'NULL' } @vals ),
+    );
 
     # see if the first element is an -and/-or op
     my $logic;
-    if ($vals[0] =~ /^ - ( AND|OR ) $/ix) {
+    if (defined $vals[0] && $vals[0] =~ /^ - ( AND|OR ) $/ix) {
       $logic = uc $1;
       shift @vals;
     }
@@ -815,38 +818,51 @@ sub _where_UNDEF {
 sub _where_field_BETWEEN {
   my ($self, $k, $op, $vals) = @_;
 
-  (ref $vals eq 'ARRAY' && @$vals == 2) or 
-  (ref $vals eq 'REF' && (@$$vals == 1 || @$$vals == 2 || @$$vals == 3))
-    or puke "special op 'between' requires an arrayref of two values (or a scalarref or arrayrefref for literal SQL)";
-
-  my ($clause, @bind, $label, $and, $placeholder);
+  my ($label, $and, $placeholder);
   $label       = $self->_convert($self->_quote($k));
   $and         = ' ' . $self->_sqlcase('and') . ' ';
   $placeholder = $self->_convert('?');
   $op               = $self->_sqlcase($op);
 
-  if (ref $vals eq 'REF') {
-    ($clause, @bind) = @$$vals;
-  }
-  else {
-    my (@all_sql, @all_bind);
+  my ($clause, @bind) = $self->_SWITCH_refkind($vals, {
+    ARRAYREFREF => sub {
+      return @$$vals;
+    },
+    SCALARREF => sub {
+      return $$vals;
+    },
+    ARRAYREF => sub {
+      puke "special op 'between' accepts an arrayref with exactly two values"
+        if @$vals != 2;
 
-    foreach my $val (@$vals) {
-      my ($sql, @bind) = $self->_SWITCH_refkind($val, {
-         SCALAR => sub {
-           return ($placeholder, ($val));
-         },
-         SCALARREF => sub {
-           return ($self->_convert($$val), ());
-         },
-      });
-      push @all_sql, $sql;
-      push @all_bind, @bind;
-    }
+      my (@all_sql, @all_bind);
+      foreach my $val (@$vals) {
+        my ($sql, @bind) = $self->_SWITCH_refkind($val, {
+           SCALAR => sub {
+             return ($placeholder, ($val));
+           },
+           SCALARREF => sub {
+             return ($self->_convert($$val), ());
+           },
+           ARRAYREFREF => sub {
+             my ($sql, @bind) = @$$val;
+             return ($self->_convert($sql), @bind);
+           },
+        });
+        push @all_sql, $sql;
+        push @all_bind, @bind;
+      }
 
-    $clause = (join $and, @all_sql);
-    @bind = $self->_bindtype($k, @all_bind);
-  }
+      return (
+        (join $and, @all_sql),
+        $self->_bindtype($k, @all_bind),
+      );
+    },
+    FALLBACK => sub {
+      puke "special op 'between' accepts an arrayref with two values, or a single literal scalarref/arrayref-ref";
+    },
+  });
+
   my $sql = "( $label $op $clause )";
   return ($sql, @bind)
 }
@@ -877,21 +893,33 @@ sub _where_field_IN {
       }
     },
 
+    SCALARREF => sub {  # literal SQL
+      my $sql = $self->_open_outer_paren ($$vals);
+      return ("$label $op ( $sql )");
+    },
     ARRAYREFREF => sub {  # literal SQL with bind
       my ($sql, @bind) = @$$vals;
       $self->_assert_bindval_matches_bindtype(@bind);
+      $sql = $self->_open_outer_paren ($sql);
       return ("$label $op ( $sql )", @bind);
     },
 
     FALLBACK => sub {
-      puke "special op 'in' requires an arrayref (or arrayref-ref)";
+      puke "special op 'in' requires an arrayref (or scalarref/arrayref-ref)";
     },
   });
 
   return ($sql, @bind);
 }
 
-
+# Some databases (SQLite) treat col IN (1, 2) different from
+# col IN ( (1, 2) ). Use this to strip all outer parens while
+# adding them back in the corresponding method
+sub _open_outer_paren {
+  my ($self, $sql) = @_;
+  $sql = $1 while $sql =~ /^ \s* \( (.*) \) \s* $/x;
+  return $sql;
+}
 
 
 #======================================================================
@@ -1944,9 +1972,28 @@ If the argument to C<-in> is an empty array, 'sqlfalse' is generated
 (by default : C<1=0>). Similarly, C<< -not_in => [] >> generates
 'sqltrue' (by default : C<1=1>).
 
+In addition to the array you can supply a chunk of literal sql or
+literal sql with bind:
+
+    my %where = {
+      customer => { -in => \[
+        'SELECT cust_id FROM cust WHERE balance > ?',
+        2000,
+      ],
+      status => { -in => \'SELECT status_codes FROM states' },
+    };
+
+would generate:
+
+    $stmt = "WHERE (
+          customer IN ( SELECT cust_id FROM cust WHERE balance > ? )
+      AND status IN ( SELECT status_codes FROM states )
+    )";
+    @bind = ('2000');
 
 
-Another pair of operators is C<-between> and C<-not_between>, 
+
+Another pair of operators is C<-between> and C<-not_between>,
 used with an arrayref of two values:
 
     my %where  = (
@@ -1959,6 +2006,30 @@ used with an arrayref of two values:
 Would give you:
 
     WHERE user = ? AND completion_date NOT BETWEEN ( ? AND ? )
+
+Just like with C<-in> all plausible combinations of literal SQL
+are possible:
+
+    my %where = {
+      start0 => { -between => [ 1, 2 ] },
+      start1 => { -between => \["? AND ?", 1, 2] },
+      start2 => { -between => \"lower(x) AND upper(y)" },
+      start3 => { -between => [ 
+        \"lower(x)",
+        \["upper(?)", 'stuff' ],
+      ] },
+    };
+
+Would give you:
+
+    $stmt = "WHERE (
+          ( start0 BETWEEN ? AND ?                )
+      AND ( start1 BETWEEN ? AND ?                )
+      AND ( start2 BETWEEN lower(x) AND upper(y)  )
+      AND ( start3 BETWEEN lower(x) AND upper(?)  )
+    )";
+    @bind = (1, 2, 1, 2, 'stuff');
+
 
 These are the two builtin "special operators"; but the 
 list can be expanded : see section L</"SPECIAL OPERATORS"> below.
@@ -1979,6 +2050,21 @@ Would give you:
 
     WHERE is_user AND NOT is_enabled
 
+If a more complex combination is required, testing more conditions,
+then you should use the and/or operators:-
+
+    my %where  = (
+        -and           => [
+            -bool      => 'one',
+            -bool      => 'two',
+            -bool      => 'three',
+            -not_bool  => 'four',
+        ],
+    );
+
+Would give you:
+
+    WHERE one AND two AND three AND NOT four
 
 
 =head2 Nested conditions, -and/-or prefixes
@@ -2099,10 +2185,12 @@ with this:
     );
 
 
-TMTOWTDI.
+TMTOWTDI
 
-Conditions on boolean columns can be expressed in the 
-same way, passing a reference to an empty string :
+Conditions on boolean columns can be expressed in the same way, passing
+a reference to an empty string, however using liternal SQL in this way
+is deprecated - the preferred method is to use the boolean operators -
+see L</"Unary operators: bool"> :
 
     my %where = (
         priority  => { '<', 2 },
