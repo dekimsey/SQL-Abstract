@@ -296,15 +296,23 @@ sub select {
   my $self   = shift;
   my $table  = $self->_table(shift);
   my $fields = shift || '*';
+  my $index  = shift;
   my $where  = shift;
   my $order  = shift;
+
+  ### Index should be a ref of a ref. If not, we aren't using
+  ### indexes so fix the arguments.
+  if( ref $index ne 'REF' ){
+    ($index, $where, $order) = (undef, $index, $where);
+  }
 
   my($where_sql, @bind) = $self->where($where, $order);
 
   my $f = (ref $fields eq 'ARRAY') ? join ', ', map { $self->_quote($_) } @$fields
                                    : $fields;
   my $sql = join(' ', $self->_sqlcase('select'), $f, 
-                      $self->_sqlcase('from'),   $table)
+                      $self->_sqlcase('from'),   $table,
+                      $self->_index($index))
           . $where_sql;
 
   return wantarray ? ($sql, @bind) : $sql; 
@@ -336,7 +344,13 @@ sub delete {
 
 # Finally, a separate routine just to handle WHERE clauses
 sub where {
-  my ($self, $where, $order) = @_;
+  my ($self, $index, $where, $order) = @_;
+
+  ### Index should be a ref of a ref. If not, we aren't using
+  ### indexes so fix the arguments.
+  if( ref $index ne 'REF' ){
+    ($index, $where, $order) = (undef, $index, $where);
+  }
 
   # where ?
   my ($sql, @bind) = $self->_recurse_where($where);
@@ -998,6 +1012,46 @@ sub _order_by_chunks {
       return @ret;
     },
   });
+}
+
+
+#======================================================================
+# INDEX
+#======================================================================
+sub _index {
+    my $self = shift;
+    my $index_spec = shift;
+    return if not $index_spec;
+    $index_spec = $$index_spec;
+
+    ### Default behavior, USE INDEX
+    if( ref $index_spec eq 'ARRAY' ){
+        $index_spec = { -use => $index_spec };
+    }
+
+    puke "Only one type of index can be specified in a query (-use, -ignore, -force)."
+        if keys %$index_spec > 1;
+
+    my ($index_type) = keys %$index_spec;
+
+    puke "A list of indexes must be specified." if
+        not ref $index_spec->{$index_type}
+        or ref $index_spec->{$index_type} ne 'ARRAY'
+        or @{$index_spec->{$index_type}} == 0;
+
+    ### Lookup the proper commands.
+    my %lookup = (
+        -use    => $self->_sqlcase('use index'),
+        -ignore => $self->_sqlcase('ignore index'),
+        -force  => $self->_sqlcase('force index'),
+    );
+    my @return;
+    ### Format the sql.
+    ### ex: USE INDEX ( index1, index2, index3 )
+    my $sql_cmd = $lookup{$index_type};
+    my $index_names = join q{, }, map { $self->_quote($_) } @{ $index_spec->{$index_type} };
+    push @return, $sql_cmd, q{(}, $index_names, q{)};
+    return @return;
 }
 
 
