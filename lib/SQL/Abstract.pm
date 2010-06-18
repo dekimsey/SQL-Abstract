@@ -344,13 +344,7 @@ sub delete {
 
 # Finally, a separate routine just to handle WHERE clauses
 sub where {
-  my ($self, $index, $where, $order) = @_;
-
-  ### Index should be a ref of a ref. If not, we aren't using
-  ### indexes so fix the arguments.
-  if( ref $index ne 'REF' ){
-    ($index, $where, $order) = (undef, $index, $where);
-  }
+  my ($self, $where, $order) = @_;
 
   # where ?
   my ($sql, @bind) = $self->_recurse_where($where);
